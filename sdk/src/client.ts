@@ -203,13 +203,33 @@ export class VoteChainClient {
     return this.invoke(signer, op, () => undefined);
   }
 
-  /** Creates a new proposal and returns its assigned ID. */
+  /**
+   * Creates a new proposal and returns its assigned ID.
+   *
+   * If `params.fullDescriptionCid` is set (#331), the on-chain `description`
+   * is stored as `description` plus a `\n\nipfs:<cid>` marker instead of the
+   * raw text, so callers should keep `description` short enough that the
+   * combined string stays within Soroban's 1024-byte string limit — the
+   * full text lives on IPFS and is resolved client-side (see
+   * `frontend/src/utils/ipfs.ts`'s `decodeFullDescriptionCid`).
+   */
   async createProposal(signer: Signer, params: CreateProposalParams): Promise<TxResult<bigint>> {
+    const SOROBAN_STRING_LIMIT = 1024;
+    const onChainDescription = params.fullDescriptionCid
+      ? `${params.description}\n\nipfs:${params.fullDescriptionCid.trim()}`
+      : params.description;
+    if (onChainDescription.length > SOROBAN_STRING_LIMIT) {
+      throw new Error(
+        `Proposal description (${onChainDescription.length} chars, including the IPFS CID marker if set) ` +
+          `exceeds Soroban's ${SOROBAN_STRING_LIMIT}-char limit. Shorten the excerpt or rely solely on ` +
+          `fullDescriptionCid for the long-form content.`
+      );
+    }
     const op = this.contract.call(
       "create_proposal",
       nativeToScVal(params.proposer, { type: "address" }),
       nativeToScVal(params.title, { type: "string" }),
-      nativeToScVal(params.description, { type: "string" }),
+      nativeToScVal(onChainDescription, { type: "string" }),
       nativeToScVal(params.quorum, { type: "i128" }),
       nativeToScVal(params.durationSeconds, { type: "u64" })
     );
