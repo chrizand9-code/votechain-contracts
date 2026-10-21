@@ -257,7 +257,39 @@ export class VoteChainClient {
     return this.invoke(signer, op, () => undefined);
   }
 
+  /**
+   * Delegates `delegator`'s voting power to `delegate` (#329).
+   *
+   * Passing `delegator` as `delegate` clears any existing delegation
+   * (equivalent to calling {@link undelegate}). The contract rejects
+   * delegations that would form a cycle with
+   * `ContractError::CircularDelegation`.
+   */
+  async delegate(signer: Signer, delegator: string, delegate: string): Promise<TxResult<void>> {
+    const op = this.contract.call(
+      "delegate",
+      nativeToScVal(delegator, { type: "address" }),
+      nativeToScVal(delegate, { type: "address" })
+    );
+    return this.invoke(signer, op, () => undefined);
+  }
+
+  /** Revokes `delegator`'s delegation, restoring their direct voting rights (#329). */
+  async undelegate(signer: Signer, delegator: string): Promise<TxResult<void>> {
+    const op = this.contract.call("undelegate", nativeToScVal(delegator, { type: "address" }));
+    return this.invoke(signer, op, () => undefined);
+  }
+
   // ── read-only calls ──────────────────────────────────────────────────────
+
+  /**
+   * Returns `delegator`'s current delegate address. Addresses that have not
+   * delegated are their own delegate (the contract defaults to self).
+   */
+  async getDelegate(readAs: string, delegator: string): Promise<string> {
+    const op = this.contract.call("get_delegate", nativeToScVal(delegator, { type: "address" }));
+    return this.simulateRead(readAs, op, (native) => native as string);
+  }
 
   /** Returns the full proposal for `proposalId`. `readAs` may be any funded account used to simulate the read. */
   async getProposal(readAs: string, proposalId: bigint): Promise<Proposal> {

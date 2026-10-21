@@ -37,6 +37,7 @@ const GovernanceDashboard = React.lazy(() =>
   import('./pages/GovernanceDashboard').then((m) => ({ default: m.GovernanceDashboard ?? m.default }))
 );
 const Simulate = React.lazy(() => import('./pages/Simulate'));
+const WalletProfile = React.lazy(() => import('./pages/WalletProfile'));
 
 /** Updates the document title on route change (issue #16 — browser history / a11y). */
 function PageTitle({ title }: { title: string }) {
@@ -109,6 +110,16 @@ function AppRoutes() {
                 <ErrorBoundary section="Simulate">
                   <PageTitle title="Simulate" />
                   <Simulate />
+                </ErrorBoundary>
+              }
+            />
+            {/* Issue #329 — wallet profile / vote delegation settings */}
+            <Route
+              path="/profile"
+              element={
+                <ErrorBoundary section="WalletProfile">
+                  <PageTitle title="Wallet Profile" />
+                  <WalletProfile />
                 </ErrorBoundary>
               }
             />
