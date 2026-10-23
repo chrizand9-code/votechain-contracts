@@ -55,3 +55,11 @@ jobs:
           name: playwright-report-${{ matrix.project }}
           path: frontend/playwright-report/
           retention-days: 14
+
+      - name: Upload visual regression snapshots (actual)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-snapshots-actual-${{ matrix.project }}
+          path: frontend/e2e/snapshots/
+          retention-days: 14

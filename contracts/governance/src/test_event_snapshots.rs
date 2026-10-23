@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! # Issue #55 – Snapshot tests for all contract event structures
+//! # Issue #55 / #299 – Snapshot tests for all contract event structures
 //!
 //! Each test exercises exactly one event type and asserts on its topics/data
 //! shape.  The soroban test framework captures the full ledger state after

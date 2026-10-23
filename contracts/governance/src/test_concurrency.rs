@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Concurrent double-vote race condition tests (issue #91).
+//! Concurrent double-vote race condition tests (issues #91 and #301).
 //!
 //! # Why a race is not possible
 //!
@@ -40,6 +40,10 @@
 //! These tests model the two "concurrent" invocations as back-to-back calls,
 //! optionally at the same ledger sequence/timestamp (same ledger close) and at
 //! different sequences (different ledgers / XDR batches).
+//!
+//! Issue #301 extends coverage with a dedicated test for the first-vote
+//! atomicity scenario: two invocations race to cast the very first vote on a
+//! brand-new proposal where `HasVoted` has never been written.
 
 use crate::test_helpers::{create_test_proposal, setup_env};
 use crate::types::{ContractError, Vote};
@@ -147,4 +151,70 @@ fn test_burst_of_concurrent_votes_only_one_counted() {
     assert_eq!(ok, 1);
     assert_eq!(rejected, 9);
     assert_eq!(t.client.get_proposal(&id).votes_yes, 250);
+}
+
+/// Regression guard for atomic HasVoted flag setting (issue #301).
+///
+/// Two transactions race to cast the **first** vote on a brand-new proposal
+/// (the `HasVoted` key does not yet exist in storage). Both are submitted at
+/// the same ledger sequence number and timestamp to model a same-ledger-close
+/// race. The Soroban footprint-conflict rule guarantees that only one can
+/// commit; the second must observe the flag set by the first and return
+/// `AlreadyVoted`.
+///
+/// Assertions:
+/// - Exactly one of the two calls succeeds.
+/// - The other returns `AlreadyVoted`.
+/// - Vote totals reflect a single vote (no double-counting).
+/// - `has_voted` is `true` for the voter after both calls.
+#[test]
+fn test_first_vote_atomicity_simultaneous_calls() {
+    let t = setup_env();
+    let proposer = Address::generate(&t.env);
+    let voter = Address::generate(&t.env);
+
+    // Brand-new proposal — HasVoted key has never been written.
+    let id = create_test_proposal(&t, &proposer);
+    mint(&t, &voter, 750);
+
+    // Advance to the same ledger close (seq+1, ts+1) for both calls to
+    // model simultaneous submission.
+    let seq = t.env.ledger().sequence();
+    let ts = t.env.ledger().timestamp();
+    t.env.ledger().with_mut(|l| {
+        l.sequence_number = seq + 1;
+        l.timestamp = ts + 1;
+    });
+
+    // "Call A" — attempts to cast Yes as the first-ever vote.
+    let call_a = t.client.try_cast_vote(&voter, &id, &Vote::Yes, &None);
+    // "Call B" — same voter, same ledger, races to cast No as the first vote.
+    let call_b = t.client.try_cast_vote(&voter, &id, &Vote::No, &None);
+
+    let results = [call_a, call_b];
+    let ok_count = results.iter().filter(|r| matches!(r, Ok(Ok(_)))).count();
+    let already_voted_count = results
+        .iter()
+        .filter(|r| matches!(r, Err(Ok(ContractError::AlreadyVoted))))
+        .count();
+
+    assert_eq!(ok_count, 1, "exactly one first-vote attempt must succeed");
+    assert_eq!(
+        already_voted_count, 1,
+        "the racing second call must return AlreadyVoted"
+    );
+
+    // Confirm no double-counting: total weight equals the single voter's balance.
+    let p = t.client.get_proposal(&id);
+    let total_tallied = p.votes_yes + p.votes_no + p.votes_abstain;
+    assert_eq!(
+        total_tallied, 750,
+        "only one vote (weight 750) must be tallied — no double-counting"
+    );
+
+    // The voter is permanently marked as having voted.
+    assert!(
+        t.client.has_voted(&id, &voter),
+        "has_voted must be true after a successful first vote"
+    );
 }
