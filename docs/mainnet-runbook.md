@@ -272,3 +272,53 @@ Fix the failing CI check, push a new tag (e.g., `v1.2.4`), and restart the proce
 - [ ] CHANGELOG.md entry merged to `main`
 - [ ] Announce in community channels
 - [ ] Monitor contract events on [Stellar Expert](https://stellar.expert) for the first 24 hours
+
+---
+
+## Indexer Lag
+
+> **Alert:** `IndexerLagHigh` — fires when `indexer_event_lag_seconds > 300` for 2 minutes.
+
+The indexer consumes Soroban events emitted by the governance contract and writes them to
+PostgreSQL. When it falls behind, the UI shows stale proposal states (e.g., proposals that
+have finalised on-chain still appear as Active in the dashboard).
+
+### What triggers the alert
+
+The Prometheus metric `indexer_event_lag_seconds` measures the wall-clock delta between
+the timestamp of the most recently finalised on-chain event and the timestamp when the
+indexer last persisted it. When this exceeds **300 seconds (5 minutes)**, the
+`IndexerLagHigh` alert fires at `critical` severity.
+
+### Immediate response
+
+1. **Check the indexer process:**
+   ```bash
+   # In the deployment environment
+   systemctl status votechain-indexer   # or: docker compose logs indexer
+   ```
+2. **Look for errors in the logs** — common causes:
+   - Lost connection to the Stellar RPC node (network partition, node restart)
+   - PostgreSQL connection pool exhausted
+   - Indexer OOM-killed or crashed with a panic
+
+3. **Restart the indexer** (safe — it picks up from its last checkpoint):
+   ```bash
+   systemctl restart votechain-indexer   # or: docker compose restart indexer
+   ```
+
+4. **Verify recovery** — the metric should drop below 60s within 2–3 minutes of
+   a successful restart. If it does not, escalate.
+
+### If the indexer is healthy but lag persists
+
+- **Check Stellar RPC node health:** `curl https://soroban-mainnet.stellar.org/` and compare
+  `ledger_current` against [Stellar Expert](https://stellar.expert) to detect node lag.
+- **Check database disk / connection limits** — a full disk or max connections error
+  can cause silent write failures without crashing the process.
+
+### Grafana dashboard
+
+The **Indexer event lag (seconds)** panel on the
+[VoteChain Backend dashboard](http://localhost:3002/d/votechain-backend) shows a
+time-series of the lag metric with threshold lines at 120s (warning) and 300s (critical).

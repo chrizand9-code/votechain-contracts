@@ -58,6 +58,8 @@ export interface Proposal {
   id: string;
   title: string;
   description: string;
+  /** Optional proposal categories used by the frontend tag filter. */
+  tags?: string[];
   /** Address of the account that created the proposal. */
   proposer: string;
   state: ProposalState;

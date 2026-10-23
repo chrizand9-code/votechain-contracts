@@ -30,8 +30,12 @@
 //! - **Temporary** – short-lived allowances (`Allowance`).
 //!   Automatically expires; no manual TTL management required.
 
+use crate::staking::StakeRecord;
 use crate::types::{Allowance, ContractError, TokenDataKey};
 use soroban_sdk::{Address, Env};
+
+const BALANCE_TTL_THRESHOLD: u32 = 2_592_000;
+const BALANCE_TTL_EXTEND_TO: u32 = 3_110_400;
 
 // =============================================================================
 // Storage Strategy
@@ -64,17 +68,27 @@ use soroban_sdk::{Address, Env};
 
 /// Returns the token balance of `owner`. Defaults to `0` if never set.
 pub fn balance_of(env: &Env, owner: &Address) -> i128 {
-    env.storage()
-        .persistent()
-        .get(&TokenDataKey::Balance(owner.clone()))
-        .unwrap_or(0)
+    let key = TokenDataKey::Balance(owner.clone());
+    let balance = env.storage().persistent().get(&key);
+    if balance.is_some() {
+        env.storage().persistent().extend_ttl(
+            &key,
+            BALANCE_TTL_THRESHOLD,
+            BALANCE_TTL_EXTEND_TO,
+        );
+    }
+    balance.unwrap_or(0)
 }
 
 /// Sets the token balance of `owner` to `amount`.
 pub fn set_balance(env: &Env, owner: &Address, amount: i128) {
-    env.storage()
-        .persistent()
-        .set(&TokenDataKey::Balance(owner.clone()), &amount);
+    let key = TokenDataKey::Balance(owner.clone());
+    env.storage().persistent().set(&key, &amount);
+    env.storage().persistent().extend_ttl(
+        &key,
+        BALANCE_TTL_THRESHOLD,
+        BALANCE_TTL_EXTEND_TO,
+    );
 }
 
 /// Returns the spending allowance granted by `owner` to `spender`.
@@ -150,4 +164,25 @@ pub fn get_version(env: &Env) -> (u32, u32, u32) {
         .instance()
         .get(&TokenDataKey::Version)
         .unwrap_or((0, 0, 0))
+}
+
+/// SEC-013: Returns the active [`StakeRecord`] for `staker`, if any.
+pub fn get_stake_record(env: &Env, staker: &Address) -> Option<StakeRecord> {
+    env.storage()
+        .persistent()
+        .get(&TokenDataKey::StakeRecord(staker.clone()))
+}
+
+/// SEC-013: Writes (or overwrites) the [`StakeRecord`] for `staker`.
+pub fn set_stake_record(env: &Env, staker: &Address, record: &StakeRecord) {
+    env.storage()
+        .persistent()
+        .set(&TokenDataKey::StakeRecord(staker.clone()), record);
+}
+
+/// SEC-013: Deletes the [`StakeRecord`] for `staker` (called on full unstake).
+pub fn remove_stake_record(env: &Env, staker: &Address) {
+    env.storage()
+        .persistent()
+        .remove(&TokenDataKey::StakeRecord(staker.clone()));
 }

@@ -32,20 +32,23 @@ mod test_event_snapshots;
 mod test_string_boundaries;
 #[cfg(test)]
 mod test_already_voted_regression;
+#[cfg(test)]
+mod test_factories;
 
 use soroban_sdk::{contract, contractclient, contractimpl, token, Address, Env, String, Vec};
-use types::{ConfigKey, ContractConfig, ContractError, ContractState, ProposalState, ProposalType, Proposal, Vote, VoteRecord};
+use types::{ConfigKey, ContractConfig, ContractError, ContractState, ProposalState, ProposalType, Proposal, ProposalTemplate, TemplateProposalParams, Vote, VoteRecord};
 use storage::{
     clear_delegation, clear_pending_admin, count_active_proposals, decrement_active_proposals,
     get_admin, get_admin_transfer_expiry, get_contract_state, get_delegation, get_last_proposal,
     get_max_active_proposals, get_max_duration, get_min_duration, get_min_proposal_balance,
-    get_pending_admin, get_previous_wasm_hash, get_proposal_cooldown, get_restrict_admin_vote,
-    get_timelock_duration, get_version, get_vote_record, get_voter_snapshot, get_voting_token,
-    has_extended, has_voted, increment_active_proposals, is_initialized, is_paused, load_proposal,
-    mark_extended, mark_voted,
-    next_id, save_proposal, save_vote_record, save_voter_snapshot, set_admin,
-    set_admin_transfer_expiry, set_contract_state, set_delegation, set_last_proposal,
-    set_max_active_proposals, set_max_duration, set_min_duration, set_min_proposal_balance,
+    get_min_quorum_bps, get_pending_admin, get_previous_wasm_hash, get_proposal_cooldown,
+    get_restrict_admin_vote, get_timelock_duration, get_version, get_vote_record,
+    get_voter_snapshot, get_voting_token, has_extended, has_voted, has_template,
+    increment_active_proposals, is_initialized, is_paused, load_proposal, load_template,
+    mark_extended, mark_voted, next_id, remove_template, save_proposal, save_template,
+    save_vote_record, save_voter_snapshot, set_admin, set_admin_transfer_expiry,
+    set_contract_state, set_delegation, set_last_proposal, set_max_active_proposals,
+    set_max_duration, set_min_duration, set_min_proposal_balance, set_min_quorum_bps,
     set_paused, set_pending_admin, set_previous_wasm_hash, set_proposal_cooldown,
     set_restrict_admin_vote, set_timelock_duration, set_version, set_voting_token,
 };
@@ -57,6 +60,11 @@ const MAX_BATCH_VOTERS: u32 = 50;
 // Maximum byte length of an optional off-chain comment hash (e.g. IPFS CID)
 // attached to a vote via `cast_vote`. See issue #103.
 const MAX_COMMENT_HASH_LEN: u32 = 64;
+/// Default minimum quorum floor in basis points (10 BPS = 0.1% of total supply).
+/// Prevents governance capture via trivially small quorum values.
+/// Configurable at `initialize` via `min_quorum_bps`; this is the default
+/// when no value is supplied (i.e. when `min_quorum_bps == 0`).
+pub const MIN_QUORUM_BPS: u32 = 10;
 
 fn quorum_is_met(total_votes: i128, quorum: i128, votes_yes: i128, votes_no: i128) -> bool {
     total_votes >= quorum && votes_yes > votes_no
@@ -128,6 +136,8 @@ impl GovernanceContract {
     ///   becoming executable. Use `0` to disable the timelock.
     /// - `max_active_proposals`: global cap on the number of simultaneously active proposals.
     ///   `0` means use the default of 50. Set to a non-zero value to override.
+    /// - `min_quorum_bps`: minimum quorum floor in basis points (e.g. 10 = 0.1% of supply).
+    ///   `0` means use the protocol default of `MIN_QUORUM_BPS` (10). Enforced by `update_quorum`.
     ///
     /// # Errors
     /// - [`ContractError::AlreadyInitialized`] if the contract has already been initialised.
@@ -143,6 +153,7 @@ impl GovernanceContract {
         restrict_admin_vote: bool,
         timelock_duration: u64,
         max_active_proposals: u64,
+        min_quorum_bps: u32,
     ) -> Result<(), ContractError> {
         // SEC-005: auth is the first operation in every privileged function.
         admin.require_auth();
@@ -169,6 +180,10 @@ impl GovernanceContract {
         // A value of 0 means "use default (50)"; non-zero values are stored explicitly.
         if max_active_proposals > 0 {
             set_max_active_proposals(&env, max_active_proposals);
+        }
+        // A value of 0 means "use protocol default (MIN_QUORUM_BPS = 10)".
+        if min_quorum_bps > 0 {
+            set_min_quorum_bps(&env, min_quorum_bps);
         }
         set_version(&env, (1, 0, 0));
         set_contract_state(&env, &ContractState::Ready);
@@ -771,6 +786,7 @@ impl GovernanceContract {
     /// - [`ContractError::InvalidAddress`] if `admin` is the zero address.
     /// - [`ContractError::NotAdmin`] if `admin` does not match the stored admin.
     /// - [`ContractError::InvalidQuorum`] if `new_quorum` is zero or negative.
+    /// - [`ContractError::QuorumBelowFloor`] if `new_quorum` is below the configured minimum quorum floor.
     /// - [`ContractError::QuorumExceedsSupply`] if `new_quorum` exceeds `proposal.supply_snapshot`.
     /// - [`ContractError::ProposalNotFound`] if `proposal_id` does not exist.
     /// - [`ContractError::ProposalNotActive`] if the proposal is not in `Active` status.
@@ -796,6 +812,14 @@ impl GovernanceContract {
         let mut proposal = load_proposal(&env, proposal_id)?;
         if proposal.state != ProposalState::Active {
             return Err(ContractError::ProposalNotActive);
+        }
+        // Issue #257: Enforce the minimum quorum floor (MIN_QUORUM_BPS).
+        // The floor is calculated from the supply snapshot taken at proposal
+        // creation so the threshold remains deterministic.
+        let bps = get_min_quorum_bps(&env) as i128;
+        let floor = (proposal.supply_snapshot * bps + 9_999) / 10_000; // ceiling division
+        if new_quorum < floor {
+            return Err(ContractError::QuorumBelowFloor);
         }
         // #56: Bound the new quorum by the supply snapshot taken at proposal creation.
         // This anchors the validation to the supply that was available when voters
@@ -1178,6 +1202,7 @@ impl GovernanceContract {
             min_duration: get_min_duration(&env),
             max_duration: get_max_duration(&env),
             version: get_version(&env),
+            min_quorum_bps: get_min_quorum_bps(&env),
         })
     }
 
@@ -1487,5 +1512,209 @@ impl GovernanceContract {
         Ok(())
     }
 
+    // -------------------------------------------------------------------------
+    // Proposal Template API (Issue #324)
+    // -------------------------------------------------------------------------
+
+    /// Registers a proposal template that can be used to create proposals with
+    /// pre-approved defaults.
+    ///
+    /// Only the admin may register templates. The template ID must be non-empty
+    /// and must not already exist.
+    ///
+    /// # Parameters
+    /// - `admin` — the contract admin address (must authorise).
+    /// - `template_id` — unique string identifier (1-64 bytes).
+    /// - `title` — default title for proposals created from this template (1-128 bytes).
+    /// - `description` — default description (1-1024 bytes).
+    /// - `quorum` — default quorum; 0 means the caller must supply it.
+    /// - `duration` — default voting duration in seconds; 0 means the caller must supply it.
+    ///
+    /// # Errors
+    /// - [`ContractError::NotAdmin`] if caller is not the admin.
+    /// - [`ContractError::ContractPaused`] if the contract is paused.
+    /// - [`ContractError::InvalidTemplateId`] if `template_id` is empty or exceeds 64 bytes.
+    /// - [`ContractError::TemplateAlreadyExists`] if a template with this ID already exists.
+    /// - [`ContractError::InvalidTitle`] if the default title is empty or exceeds 128 bytes.
+    /// - [`ContractError::InvalidDescription`] if the default description is empty or exceeds 1024 bytes.
+    pub fn register_template(
+        env: Env,
+        admin: Address,
+        template_id: String,
+        title: String,
+        description: String,
+        quorum: i128,
+        duration: u64,
+    ) -> Result<(), ContractError> {
+        admin.require_auth();
+        require_non_zero_address(&env, &admin)?;
+        if is_paused(&env) {
+            return Err(ContractError::ContractPaused);
+        }
+        if get_admin(&env)? != admin {
+            return Err(ContractError::NotAdmin);
+        }
+
+        // Validate template_id
+        let id_len = template_id.len();
+        if id_len == 0 || id_len > storage::MAX_TEMPLATE_ID_LEN {
+            return Err(ContractError::InvalidTemplateId);
+        }
+
+        // Check for duplicate
+        if has_template(&env, &template_id) {
+            return Err(ContractError::TemplateAlreadyExists);
+        }
+
+        // Validate title and description (same rules as create_proposal)
+        let title_len = title.len();
+        if title_len == 0 || title_len > MAX_TITLE_LEN {
+            return Err(ContractError::InvalidTitle);
+        }
+        validate_string(&title, ContractError::InvalidTitle)?;
+
+        let desc_len = description.len();
+        if desc_len == 0 || desc_len > MAX_DESC_LEN {
+            return Err(ContractError::InvalidDescription);
+        }
+        validate_string(&description, ContractError::InvalidDescription)?;
+
+        // If duration is provided, validate it against the contract's range.
+        if duration > 0 {
+            let min_dur = get_min_duration(&env);
+            let max_dur = get_max_duration(&env);
+            if duration < min_dur || duration > max_dur {
+                return Err(ContractError::InvalidDurationRange);
+            }
+        }
+
+        // If quorum is provided, validate against total supply.
+        if quorum > 0 {
+            let voting_token = get_voting_token(&env)?;
+            let supply = TokenSupplyClient::new(&env, &voting_token).total_supply();
+            if quorum > supply {
+                return Err(ContractError::QuorumExceedsSupply);
+            }
+        }
+
+        let now = env.ledger().timestamp();
+        let template = ProposalTemplate {
+            template_id: template_id.clone(),
+            title,
+            description,
+            quorum,
+            duration,
+            registered_by: admin.clone(),
+            registered_at: now,
+        };
+        save_template(&env, &template);
+        events::template_registered(&env, &admin, &template_id);
+        Ok(())
+    }
+
+    /// Removes a registered proposal template.
+    ///
+    /// Only the admin may remove templates.
+    ///
+    /// # Errors
+    /// - [`ContractError::NotAdmin`] if caller is not the admin.
+    /// - [`ContractError::ContractPaused`] if the contract is paused.
+    /// - [`ContractError::TemplateNotFound`] if the template does not exist.
+    pub fn remove_template(env: Env, admin: Address, template_id: String) -> Result<(), ContractError> {
+        admin.require_auth();
+        require_non_zero_address(&env, &admin)?;
+        if is_paused(&env) {
+            return Err(ContractError::ContractPaused);
+        }
+        if get_admin(&env)? != admin {
+            return Err(ContractError::NotAdmin);
+        }
+        if !remove_template(&env, &template_id) {
+            return Err(ContractError::TemplateNotFound);
+        }
+        events::template_removed(&env, &admin, &template_id);
+        Ok(())
+    }
+
+    /// Returns a registered proposal template by its ID.
+    ///
+    /// Read-only; does not require auth.
+    ///
+    /// # Errors
+    /// - [`ContractError::TemplateNotFound`] if the template does not exist.
+    pub fn get_template(env: Env, template_id: String) -> Result<ProposalTemplate, ContractError> {
+        load_template(&env, &template_id)
+    }
+
+    /// Creates a proposal from a registered template, merging template defaults
+    /// with caller-supplied overrides.
+    ///
+    /// For each field in `params`, if the value is `None` the template's default
+    /// is used. If the template's default is also 0/empty for quorum/duration, the
+    /// caller **must** supply a value or the call will fail.
+    ///
+    /// # Parameters
+    /// - `proposer` — the address creating the proposal (must authorise).
+    /// - `template_id` — ID of the template to use.
+    /// - `params` — optional overrides for title, description, quorum, and duration.
+    ///
+    /// # Returns
+    /// The numeric ID of the newly created proposal.
+    ///
+    /// # Errors
+    /// Same as [`create_proposal`], plus:
+    /// - [`ContractError::TemplateNotFound`] if the template does not exist.
+    /// - [`ContractError::InvalidQuorum`] if no quorum is available from params or template.
+    /// - [`ContractError::InvalidDuration`] if no duration is available from params or template.
+    pub fn create_proposal_from_template(
+        env: Env,
+        proposer: Address,
+        template_id: String,
+        params: TemplateProposalParams,
+    ) -> Result<u64, ContractError> {
+        // Load the template first (before auth checks on proposer, since
+        // template loading is read-only).
+        let template = load_template(&env, &template_id)?;
+
+        // Resolve effective values: params override > template default.
+        let title = params.title.unwrap_or_else(|| template.title.clone());
+        let description = params.description.unwrap_or_else(|| template.description.clone());
+
+        let quorum = match params.quorum {
+            Some(q) => q,
+            None => {
+                if template.quorum > 0 {
+                    template.quorum
+                } else {
+                    return Err(ContractError::InvalidQuorum);
+                }
+            }
+        };
+
+        let duration = match params.duration {
+            Some(d) => d,
+            None => {
+                if template.duration > 0 {
+                    template.duration
+                } else {
+                    return Err(ContractError::InvalidDuration);
+                }
+            }
+        };
+
+        // Delegate to the existing create_proposal_internal for all validation.
+        let id = Self::create_proposal_internal(
+            env,
+            proposer.clone(),
+            title,
+            description,
+            quorum,
+            duration,
+            ProposalType::Standard,
+        )?;
+
+        events::proposal_from_template(&env, id, &proposer, &template_id);
+        Ok(id)
+    }
 
 }

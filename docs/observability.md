@@ -3,6 +3,34 @@
 The VoteChain backend (`backend/`) exposes Prometheus metrics and ships with a
 local Prometheus + Grafana stack for development. (#66)
 
+## Kubernetes health probes
+
+`GET /live` is a liveness probe: it returns HTTP 200 while the process can
+serve requests and does not depend on external services. `GET /ready` checks
+PostgreSQL, Redis, and Stellar RPC and returns HTTP 503 if any component is
+degraded. `GET /health` returns the same readiness status plus the per-component
+results for diagnostics.
+
+Set `HEALTH_CHECK_TIMEOUT_MS` to a positive number of milliseconds to change
+the per-component timeout (default: 2000 ms). Configure `DATABASE_URL`,
+`REDIS_URL`, and `STELLAR_RPC_URL` for the readiness checks.
+
+Use `/live` for Kubernetes `livenessProbe` and `/ready` for
+`readinessProbe`; do not use `/health` as the liveness probe because a
+dependency outage should not cause Kubernetes to repeatedly restart a healthy
+process.
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /live
+    port: 3001
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: 3001
+```
+
 ## Metrics endpoint
 
 `GET /metrics` returns metrics in Prometheus text-exposition format, mounted

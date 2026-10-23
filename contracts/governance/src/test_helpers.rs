@@ -51,6 +51,7 @@ pub fn setup_env() -> TestEnv {
         &false,
         &0_u64,
         &0_u64, // max_active_proposals = 0 → use default of 50
+        &0_u32, // min_quorum_bps = 0 → use protocol default of 10 BPS
     );
 
     TestEnv {

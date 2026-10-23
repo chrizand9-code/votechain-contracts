@@ -4,7 +4,7 @@
 |---|---|
 | Record type | Security analysis |
 | Date | 2026-09-29 |
-| Status | Open; mitigations documented, implementation pending |
+| Status | Resolved — mitigations implemented in `contracts/token/src/staking.rs` and `contracts/token/src/lib.rs` (`transfer`/`transfer_from`), with regression tests in `contracts/token/src/test.rs` (see issue #316) |
 | Severity | Not recorded |
 | Affected components | `contracts/token/src/staking.rs`, `contracts/token/src/lib.rs` — `stake`, `unstake`, `transfer`, `transfer_from` |
 | Reporter / reviewer | Not recorded |
@@ -245,6 +245,23 @@ implementation before this feature is deployed:
 **Overall:** The lock bypass via allowance and the duration overflow are the
 two highest-priority issues.  Both have clear, low-complexity mitigations.
 The flash loan attack is self-mitigated by the lock design.
+
+### 7.1 Implementation Note (issue #316)
+
+All checks in §6 are now implemented:
+
+- `stake`/`unstake`/`staked_voting_power` in `staking.rs` are fully
+  implemented (no longer `todo!()` stubs), including `checked_add` for
+  `locked_until`, a `MAX_LOCK_DAYS` duration cap, and the balance-capped,
+  zero-balance-safe `staked_voting_power` computation from §4.
+- `TokenContract::transfer` and `TokenContract::transfer_from` in `lib.rs`
+  both call `staking::transferable_balance` before debiting `from`'s
+  balance, returning `ContractError::TokensLocked` if `amount` exceeds the
+  unstaked portion — this closes the allowance-trick bypass in §2 for both
+  direct transfers and `transfer_from`.
+- Regression tests reproducing the attack from §2.1 (approve-before-stake,
+  then `transfer_from` after the stake is active) and covering the other
+  checks in §6 live in `contracts/token/src/test.rs`.
 
 ---
 

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { isValidStellarAddress } from "../utils/stellarAddress";
 
 export const STELLAR_NETWORK: "TESTNET" | "MAINNET" =
   (import.meta.env.VITE_STELLAR_NETWORK ?? "TESTNET").toUpperCase() === "MAINNET"
@@ -26,7 +27,23 @@ type WalletState = {
   connected: boolean;
 };
 
+/**
+ * SEC (#319): Freighter is a third-party browser extension — its return
+ * values must be treated as untrusted input. `getPublicKey()` is expected
+ * to return a 56-character Stellar G-address, but a malicious or buggy
+ * extension could return an arbitrary string. We validate with
+ * `isValidStellarAddress` (frontend/src/utils/stellarAddress.ts) before
+ * ever displaying it, falling back to a safe placeholder for anything
+ * that is not a structurally valid address. React JSX text nodes are
+ * HTML-escaped regardless, so this does not change the XSS surface, but
+ * it prevents a crafted non-standard string (overlong, control
+ * characters, homoglyphs, etc.) from being rendered as if it were a
+ * trustworthy wallet address.
+ */
 function truncate(addr: string) {
+  if (!isValidStellarAddress(addr)) {
+    return "invalid-address";
+  }
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 }
 
@@ -43,6 +60,7 @@ export function FreighterWallet() {
   const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
   const failedAttempts = useRef(0);
   const inFlight = useRef(false);
+  const [mismatchDismissed, setMismatchDismissed] = useState(false);
 
   // Clear the cooldown once it expires.
   useEffect(() => {
@@ -89,6 +107,11 @@ export function FreighterWallet() {
       await freighter.requestAccess();
       const address: string = await freighter.getPublicKey();
       const network: string = await freighter.getNetwork();
+      // SEC (#319): reject a non-standard address from the extension up
+      // front rather than storing/rendering it.
+      if (!isValidStellarAddress(address)) {
+        throw new Error(t("wallet.failed"));
+      }
       setWallet({ address, network, connected: true });
       failedAttempts.current = 0;
     } catch (e: unknown) {

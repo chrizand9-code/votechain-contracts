@@ -19,6 +19,7 @@ use soroban_sdk::{
     testutils::{Address as _, Events, Ledger},
     Address, Env, IntoVal, TryFromVal,
 };
+use crate::types::TokenDataKey;
 
 fn setup() -> (Env, TokenContractClient<'static>) {
     let env = Env::default();
@@ -45,6 +46,22 @@ fn test_transfer() {
     c.transfer(&admin, &user, &400);
     assert_eq!(c.balance(&admin), 600);
     assert_eq!(c.balance(&user), 400);
+}
+
+#[test]
+fn test_balance_read_extends_persistent_entry_ttl() {
+    let (env, c) = setup();
+    let admin = Address::generate(&env);
+    c.initialize(&admin, &1_000);
+
+    let key = TokenDataKey::Balance(admin.clone());
+    env.storage().persistent().extend_ttl(&key, 1, 1);
+    let ttl_before = env.storage().persistent().get_ttl(&key);
+
+    assert_eq!(c.balance(&admin), 1_000);
+
+    let ttl_after = env.storage().persistent().get_ttl(&key);
+    assert!(ttl_after > ttl_before);
 }
 
 #[test]
@@ -456,6 +473,166 @@ fn test_transfer_admin_emits_event() {
                 .as_ref()
                 == Some(&(admin.clone(), new_admin.clone()))
     }));
+}
+
+// ---------------------------------------------------------------------------
+// SEC-013: Staking lock-bypass regression tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_stake_locks_tokens_against_direct_transfer() {
+    let (env, c) = setup();
+    let admin = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    c.initialize(&admin, &1_000);
+    c.transfer(&admin, &alice, &1_000);
+
+    // Alice locks all 1,000 tokens for 365 days.
+    c.stake(&alice, &1_000, &(365 * 86_400));
+
+    // SEC-013 §2.3: a direct transfer of locked tokens must revert.
+    let result = c.try_transfer(&alice, &bob, &1);
+    assert!(result.is_err());
+    assert_eq!(c.balance(&alice), 1_000);
+}
+
+#[test]
+fn test_stake_lock_bypass_via_allowance_is_rejected() {
+    // SEC-013 §2.1: reproduces the allowance-trick attack described in
+    // docs/security/SEC-013-staking-lock-bypass.md — Alice approves Bob
+    // *before* staking, then Bob attempts transfer_from after the stake is
+    // in place. The fix must reject this even though the allowance itself
+    // is valid and unexpired.
+    let (env, c) = setup();
+    let admin = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let carol = Address::generate(&env);
+    c.initialize(&admin, &1_000);
+    c.transfer(&admin, &alice, &1_000);
+
+    let expiry = env.ledger().sequence() + 1_000;
+    c.approve(&alice, &bob, &1_000, &expiry);
+    c.stake(&alice, &1_000, &(365 * 86_400));
+
+    let result = c.try_transfer_from(&bob, &alice, &carol, &1_000);
+    assert!(
+        result.is_err(),
+        "locked tokens must not be movable via transfer_from, even with a valid allowance"
+    );
+    assert_eq!(c.balance(&alice), 1_000);
+    assert_eq!(c.balance(&carol), 0);
+}
+
+#[test]
+fn test_partial_transfer_of_unstaked_balance_succeeds() {
+    let (env, c) = setup();
+    let admin = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    c.initialize(&admin, &1_000);
+    c.transfer(&admin, &alice, &1_000);
+
+    // Only 600 of the 1,000 tokens are staked — the remaining 400 stay
+    // freely transferable.
+    c.stake(&alice, &600, &(365 * 86_400));
+    c.transfer(&alice, &bob, &400);
+    assert_eq!(c.balance(&alice), 600);
+    assert_eq!(c.balance(&bob), 400);
+
+    // The last unstaked unit must still be blocked once exhausted.
+    let result = c.try_transfer(&alice, &bob, &1);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_unstake_before_lock_expiry_reverts() {
+    let (env, c) = setup();
+    let admin = Address::generate(&env);
+    let alice = Address::generate(&env);
+    c.initialize(&admin, &1_000);
+    c.transfer(&admin, &alice, &1_000);
+    c.stake(&alice, &1_000, &(365 * 86_400));
+
+    let result = c.try_unstake(&alice);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_unstake_after_lock_expiry_restores_transferability() {
+    let (env, c) = setup();
+    let admin = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    c.initialize(&admin, &1_000);
+    c.transfer(&admin, &alice, &1_000);
+    c.stake(&alice, &1_000, &(365 * 86_400));
+
+    env.ledger().with_mut(|l| l.timestamp += 365 * 86_400);
+    c.unstake(&alice);
+
+    // Fully unlocked: the whole balance is transferable again.
+    c.transfer(&alice, &bob, &1_000);
+    assert_eq!(c.balance(&alice), 0);
+    assert_eq!(c.balance(&bob), 1_000);
+}
+
+#[test]
+fn test_staked_voting_power_applies_multiplier() {
+    let (env, c) = setup();
+    let admin = Address::generate(&env);
+    let alice = Address::generate(&env);
+    c.initialize(&admin, &1_000);
+    c.transfer(&admin, &alice, &1_000);
+    c.stake(&alice, &1_000, &(365 * 86_400));
+
+    // 365-day lock => 4x multiplier => 4,000 effective voting power.
+    assert_eq!(c.staked_voting_power(&alice), 4_000);
+}
+
+#[test]
+fn test_staked_voting_power_zero_balance_ignores_stale_record() {
+    // SEC-013 §4: defence-in-depth — even if a stale StakeRecord somehow
+    // survived a zero-balance transition, staked_voting_power must return 0.
+    let (env, c) = setup();
+    let admin = Address::generate(&env);
+    let alice = Address::generate(&env);
+    c.initialize(&admin, &1_000);
+    c.transfer(&admin, &alice, &1_000);
+    c.stake(&alice, &1_000, &(365 * 86_400));
+
+    env.ledger().with_mut(|l| l.timestamp += 365 * 86_400);
+    c.unstake(&alice);
+    c.transfer(&alice, &admin, &1_000);
+
+    assert_eq!(c.staked_voting_power(&alice), 0);
+}
+
+#[test]
+fn test_stake_invalid_lock_duration_reverts() {
+    let (env, c) = setup();
+    let admin = Address::generate(&env);
+    let alice = Address::generate(&env);
+    c.initialize(&admin, &1_000);
+    c.transfer(&admin, &alice, &1_000);
+
+    // 366 days > MAX_LOCK_DAYS (365) must revert.
+    let result = c.try_stake(&alice, &1_000, &(366 * 86_400));
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_stake_already_staked_reverts() {
+    let (env, c) = setup();
+    let admin = Address::generate(&env);
+    let alice = Address::generate(&env);
+    c.initialize(&admin, &1_000);
+    c.transfer(&admin, &alice, &1_000);
+    c.stake(&alice, &500, &(100 * 86_400));
+
+    let result = c.try_stake(&alice, &100, &(100 * 86_400));
+    assert!(result.is_err());
 }
 
 // ── end SC-017 ────────────────────────────────────────────────────────────────

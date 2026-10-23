@@ -156,4 +156,36 @@ describe('VoteHistory', () => {
     expect(clickSpy).toHaveBeenCalled();
     expect(revokeObjectURL).toHaveBeenCalled();
   });
+
+  it('shows progress and disables export while generating the CSV', async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(window, 'URL', {
+      value: { createObjectURL: vi.fn().mockReturnValue('blob:mock'), revokeObjectURL: vi.fn() },
+      writable: true,
+      configurable: true,
+    });
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+    render(<VoteHistory proposals={proposals} />);
+    const exportButton = screen.getByRole('button', { name: /export csv/i });
+    const clickPromise = user.click(exportButton);
+
+    expect(await screen.findByRole('progressbar', { name: 'Exporting CSV' })).toBeInTheDocument();
+    expect(exportButton).toBeDisabled();
+    await clickPromise;
+  });
+
+  it('shows an error alert if CSV export fails', async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(window, 'URL', {
+      value: { createObjectURL: vi.fn().mockImplementation(() => { throw new Error('export failed'); }) },
+      writable: true,
+      configurable: true,
+    });
+
+    render(<VoteHistory proposals={proposals} />);
+    await user.click(screen.getByRole('button', { name: /export csv/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('CSV export failed');
+  });
 });

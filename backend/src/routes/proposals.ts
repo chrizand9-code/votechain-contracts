@@ -260,4 +260,15 @@ router.get("/metrics/cache", (_req: Request, res: Response) => {
   res.json(getCacheMetrics());
 });
 
+// GET /voters/:address/votes — validate Stellar address before processing
+router.get(
+  "/voters/:address/votes",
+  validateAddressParam("address"),
+  async (req: Request, res: Response) => {
+    const { address } = req.params;
+    // TODO: fetch vote history for voter from indexer
+    res.json({ voter: address, votes: [] });
+  }
+);
+
 export default router;

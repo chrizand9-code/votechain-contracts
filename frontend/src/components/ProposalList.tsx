@@ -13,9 +13,10 @@
 // limitations under the License.
 
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import type { Proposal, ProposalState } from '../types';
 import QuorumProgressBar from './QuorumProgressBar';
+import { sanitizeText } from '../utils/sanitize';
 
 const sortOptions = [
   { value: 'newest', label: 'Newest' },
@@ -40,11 +41,41 @@ type StateFilter = 'All' | ProposalState;
 
 type SortKey = (typeof sortOptions)[number]['value'];
 
+function normalizeTag(value: string): string | null {
+  const normalized = value.trim().toLowerCase();
+  return /^[a-z0-9-]{1,32}$/.test(normalized) ? normalized : null;
+}
+
 export default function ProposalList({ proposals }: Props) {
   const [searchText, setSearchText] = useState('');
   const [stateFilter, setStateFilter] = useState<StateFilter>('All');
   const [sortKey, setSortKey] = useState<SortKey>('newest');
-  const hasActiveFilters = searchText.trim() !== '' || stateFilter !== 'All';
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedTags = new Set(
+    (searchParams.get('tags') ?? '')
+      .split(',')
+      .map(normalizeTag)
+      .filter((tag): tag is string => tag !== null),
+  );
+  const availableTags = [...new Set(
+    proposals.flatMap((proposal) =>
+      (proposal.tags ?? []).map(normalizeTag).filter((tag): tag is string => tag !== null),
+    ),
+  )].sort();
+  const hasActiveFilters = searchText.trim() !== '' || stateFilter !== 'All' || selectedTags.size > 0;
+
+  function toggleTag(tag: string) {
+    const updatedTags = new Set(selectedTags);
+    if (updatedTags.has(tag)) updatedTags.delete(tag);
+    else updatedTags.add(tag);
+
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      if (updatedTags.size === 0) next.delete('tags');
+      else next.set('tags', [...updatedTags].sort().join(','));
+      return next;
+    });
+  }
 
   const filtered = useMemo(() => {
     const normalizedSearch = searchText.trim().toLowerCase();
@@ -54,7 +85,9 @@ export default function ProposalList({ proposals }: Props) {
           value.toLowerCase().includes(normalizedSearch)
         );
         const matchesState = stateFilter === 'All' || proposal.state === stateFilter;
-        return matchesText && matchesState;
+        const proposalTags = (proposal.tags ?? []).map(normalizeTag);
+        const matchesTags = selectedTags.size === 0 || [...selectedTags].every((tag) => proposalTags.includes(tag));
+        return matchesText && matchesState && matchesTags;
       })
       .sort((a, b) => {
         if (sortKey === 'newest') {
@@ -68,7 +101,7 @@ export default function ProposalList({ proposals }: Props) {
         }
         return a.endAt.localeCompare(b.endAt);
       });
-  }, [proposals, searchText, stateFilter, sortKey]);
+  }, [proposals, searchText, stateFilter, sortKey, searchParams]);
 
   return (
     <section aria-labelledby="proposal-list-heading" className="card">
@@ -114,6 +147,20 @@ export default function ProposalList({ proposals }: Props) {
           </select>
         </label>
       </div>
+      {availableTags.length > 0 && (
+        <div role="group" aria-label="Filter by tag" className="tag-filter">
+          {availableTags.map((tag) => (
+            <button
+              key={tag}
+              type="button"
+              aria-pressed={selectedTags.has(tag)}
+              onClick={() => toggleTag(tag)}
+            >
+              {tag}
+            </button>
+          ))}
+        </div>
+      )}
       {filtered.length === 0 ? (
         <div className="proposal-empty-state" role="status" aria-live="polite">
           <svg className="proposal-empty-state__illustration" viewBox="0 0 80 80" aria-hidden="true">
@@ -132,6 +179,11 @@ export default function ProposalList({ proposals }: Props) {
               onClick={() => {
                 setSearchText('');
                 setStateFilter('All');
+                setSearchParams((current) => {
+                  const next = new URLSearchParams(current);
+                  next.delete('tags');
+                  return next;
+                });
               }}
             >
               Clear filters
@@ -159,7 +211,7 @@ export default function ProposalList({ proposals }: Props) {
                 <tr key={proposal.id}>
                   <td>{proposal.id}</td>
                   <td>
-                    <Link to={`/proposals/${proposal.id}`}>{proposal.title}</Link>
+                    <Link to={`/proposals/${proposal.id}`}>{sanitizeText(proposal.title)}</Link>
                   </td>
                   <td>
                     <span className={statusClass(proposal.state)}>{labelForState(proposal.state)}</span>

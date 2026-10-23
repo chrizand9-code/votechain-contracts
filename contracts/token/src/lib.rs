@@ -15,6 +15,7 @@
 #![no_std]
 
 mod events;
+mod staking;
 mod storage;
 mod types;
 
@@ -133,6 +134,11 @@ impl TokenContract {
         if b < amount {
             return Err(ContractError::InsufficientBalance);
         }
+        // SEC-013 §2.3: tokens committed to an active stake lock cannot be
+        // transferred until the lock expires.
+        if staking::transferable_balance(&env, &from, b) < amount {
+            return Err(ContractError::TokensLocked);
+        }
         set_balance(&env, &from, b - amount);
         set_balance(&env, &to, balance_of(&env, &to) + amount);
         events::transferred(&env, &from, &to, amount);
@@ -230,6 +236,12 @@ impl TokenContract {
         let b = balance_of(&env, &from);
         if b < amount {
             return Err(ContractError::InsufficientBalance);
+        }
+        // SEC-013 §2.1/§2.3: block the allowance-trick lock bypass — a
+        // spender cannot move `from`'s tokens past the transferable
+        // (unstaked) balance, even with a valid, unexpired allowance.
+        if staking::transferable_balance(&env, &from, b) < amount {
+            return Err(ContractError::TokensLocked);
         }
         // Update allowance: keep same expiry, reduce amount.
         if let Some(a) = get_allowance(&env, &from, &spender) {
@@ -360,5 +372,40 @@ impl TokenContract {
     /// spent, or if the allowance has expired (`current_ledger > expiry_ledger`).
     pub fn allowance(env: Env, owner: Address, spender: Address) -> i128 {
         storage::allowance(&env, &owner, &spender)
+    }
+
+    /// SEC-013 / ADR-013: Locks `amount` tokens for `lock_duration_seconds`,
+    /// granting a time-weighted voting-power multiplier once staked.
+    ///
+    /// # Errors
+    /// - [`ContractError::InvalidAmount`] if `amount` is zero or negative.
+    /// - [`ContractError::InvalidLockDuration`] if the duration exceeds
+    ///   `staking::MAX_LOCK_DAYS`.
+    /// - [`ContractError::AlreadyStaked`] if `staker` already has a position.
+    /// - [`ContractError::InsufficientBalance`] if the transferable balance is
+    ///   less than `amount`.
+    pub fn stake(
+        env: Env,
+        staker: Address,
+        amount: i128,
+        lock_duration_seconds: u64,
+    ) -> Result<(), ContractError> {
+        staking::stake(&env, staker, amount, lock_duration_seconds)
+    }
+
+    /// SEC-013 / ADR-013: Releases an expired stake position, restoring the
+    /// locked tokens to the transferable balance.
+    ///
+    /// # Errors
+    /// - [`ContractError::StakeNotFound`] if `staker` has no active position.
+    /// - [`ContractError::StakeLocked`] if `locked_until` has not yet passed.
+    pub fn unstake(env: Env, staker: Address) -> Result<(), ContractError> {
+        staking::unstake(&env, staker)
+    }
+
+    /// SEC-013 / ADR-013: Returns the time-weighted voting power for `staker`,
+    /// accounting for any active stake lock multiplier.
+    pub fn staked_voting_power(env: Env, staker: Address) -> i128 {
+        staking::staked_voting_power(&env, staker)
     }
 }

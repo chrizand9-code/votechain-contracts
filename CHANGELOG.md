@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **SEC-013** (#316): Implemented the ve-token staking lock (`stake`,
+  `unstake`, `staked_voting_power` in `contracts/token/src/staking.rs`) and
+  wired lock enforcement into `TokenContract::transfer` and
+  `TokenContract::transfer_from`, closing the allowance-trick lock-bypass
+  attack described in `docs/security/SEC-013-staking-lock-bypass.md`.
+
 ## [0.1.0] - 2026-04-27
 
 ### Added

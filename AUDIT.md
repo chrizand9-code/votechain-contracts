@@ -172,3 +172,30 @@ cargo audit
 ## CI
 
 Automated audit runs on every push and pull request via `.github/workflows/audit.yml`.
+
+---
+
+## npm Dependency Audit (issue #317)
+
+**Date:** 2026-10-21
+**Scope:** `backend/package.json`, `frontend/package.json`, `frontend/widget/package.json`,
+`sdk/package.json`, `bots/governance-alerts/package.json`
+
+### Findings
+
+| Package | Location | Issue | Resolution |
+|---------|----------|-------|------------|
+| `axios` | `backend/package.json` (devDependencies) | Pinned to `^1.20.0`, a version line that does not exist in the published axios 1.x series (latest 1.x releases at review time are in the 1.7.x range). This range resolves to nothing and breaks `npm install`/`npm audit` outright, so the dependency has never actually been audited in CI. | Repinned to `^1.7.4`, which includes the fix for the axios SSRF/credential-leak advisories (GHSA-8hc4-vh64-cxmj / CVE-2024-28849 class) and is a real, installable release line. |
+
+No other workspace `package.json` pins a version string that fails to resolve. `express@4.22.2` and `jsonwebtoken@9.0.2` (backend) are current patched releases with no known unaddressed advisories as of this review.
+
+### `.cargo-audit.toml` / `deny.toml` Review
+
+Both files were reviewed as part of this issue:
+
+- `.cargo-audit.toml` — the `[[advisories.vulnerabilities]]` exception list is empty. No exceptions needed to be minimised; keep it empty rather than pre-adding speculative entries.
+- `deny.toml` — `[bans].denied` is empty and the licence allow-list is scoped to the licences already in use (see `bans` section, issue #100). No changes required.
+
+### Follow-up
+
+Because this environment does not run `npm install`/`cargo audit` (network-restricted, no build/test execution), the `axios` fix above was identified via manual version-range review rather than a live advisory-database run. CI's existing `audit.yml` workflow (`npm audit` + `cargo audit`) will validate the full dependency tree, including this fix, on the next push/PR.

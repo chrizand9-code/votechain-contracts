@@ -1,0 +1,64 @@
+{
+  "nav": {
+    "title": "VoteChain",
+    "subtitle": "Gobernanza Stellar",
+    "switchLanguage": "Cambiar idioma",
+    "langEN": "EN",
+    "langES": "ES"
+  },
+  "proposals": {
+    "heading": "Propuestas",
+    "searchPlaceholder": "Buscar por título o descripción",
+    "searchLabel": "Buscar propuestas",
+    "filterAll": "Todas",
+    "filterActive": "Activas",
+    "filterPassed": "Aprobadas",
+    "filterRejected": "Rechazadas",
+    "filterExecuted": "Ejecutadas",
+    "filterCancelled": "Canceladas",
+    "sortNewest": "Más recientes",
+    "sortOldest": "Más antiguas",
+    "sortMostVotes": "Más votos",
+    "sortEndingSoon": "Por finalizar",
+    "colId": "ID",
+    "colTitle": "Título",
+    "colState": "Estado",
+    "colCreated": "Creada",
+    "colEndDate": "Fecha de cierre",
+    "colVotes": "Votos",
+    "colWeight": "Peso",
+    "noResults": "Ninguna propuesta coincide con tu búsqueda y filtros.",
+    "caption": "Listado filtrado y ordenado de propuestas"
+  },
+  "states": {
+    "Active": "Activa",
+    "Passed": "Aprobada",
+    "Rejected": "Rechazada",
+    "Executed": "Ejecutada",
+    "Cancelled": "Cancelada"
+  },
+  "errors": {
+    "boundaryHeading": "Algo salió mal",
+    "boundaryMessage": "Ocurrió un error inesperado en esta sección.",
+    "proposalNotFound": "Propuesta no encontrada",
+    "proposalNotFoundMessage": "La propuesta que buscas no existe.",
+    "loadFailed": "No se pudieron cargar las propuestas. Inténtalo de nuevo más tarde."
+  },
+  "quorum": {
+    "progress": "Progreso del quórum",
+    "met": "alcanzado",
+    "notMet": "aún no alcanzado"
+  },
+  "voting": {
+    "voteFor": "A favor",
+    "voteAgainst": "En contra",
+    "voteAbstain": "Abstención",
+    "connectWallet": "Conecta tu billetera para votar",
+    "submitVote": "Enviar voto"
+  },
+  "common": {
+    "loading": "Cargando…",
+    "back": "Volver",
+    "viewOnExplorer": "Ver en Stellar Explorer"
+  }
+}

@@ -1,33 +1,25 @@
 version: 2
 updates:
-  # Workspace root (contracts, fuzz, shared crates).
-  # Security updates bypass grouping and are always opened immediately —
-  # this is native Dependabot behavior, not something configured here.
+  # ── Cargo: workspace root (contracts, fuzz, shared crates) ───────────────────
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "security"
+    assignees:
+      - "veracindarella"
     groups:
       cargo-minor-patch:
         update-types:
           - "minor"
           - "patch"
-    # Allow PRs to be opened automatically for patches and minor updates
-
-  - package-ecosystem: "cargo"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    assignees:
-      - "veracindarella"
-    labels:
-      - "dependencies"
-      - "security"
     allow:
       - dependency-type: "all"
 
+  # ── Cargo: indexer ────────────────────────────────────────────────────────────
   - package-ecosystem: "cargo"
     directory: "/indexer"
     schedule:
@@ -41,6 +33,7 @@ updates:
           - "minor"
           - "patch"
 
+  # ── Cargo: REST API ───────────────────────────────────────────────────────────
   - package-ecosystem: "cargo"
     directory: "/api"
     schedule:
@@ -54,6 +47,7 @@ updates:
           - "minor"
           - "patch"
 
+  # ── npm: frontend ─────────────────────────────────────────────────────────────
   - package-ecosystem: "npm"
     directory: "/frontend"
     schedule:
@@ -61,12 +55,14 @@ updates:
     open-pull-requests-limit: 10
     labels:
       - "dependencies"
+      - "npm"
     groups:
       npm-minor-patch:
         update-types:
           - "minor"
           - "patch"
 
+  # ── npm: backend ──────────────────────────────────────────────────────────────
   - package-ecosystem: "npm"
     directory: "/backend"
     schedule:
@@ -74,15 +70,46 @@ updates:
     open-pull-requests-limit: 10
     labels:
       - "dependencies"
+      - "npm"
     groups:
       npm-minor-patch:
         update-types:
           - "minor"
           - "patch"
 
-  # Auto-update pinned GitHub Actions SHAs.
-  # Dependabot will open grouped PRs to reduce noise when multiple actions
-  # release on the same day.
+  # ── npm: sdk ──────────────────────────────────────────────────────────────────
+  - package-ecosystem: "npm"
+    directory: "/sdk"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "npm"
+    groups:
+      npm-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # ── npm: bots/governance-alerts ───────────────────────────────────────────────
+  - package-ecosystem: "npm"
+    directory: "/bots/governance-alerts"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "npm"
+    groups:
+      npm-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # ── GitHub Actions ────────────────────────────────────────────────────────────
+  # Auto-update pinned GitHub Actions SHAs. Dependabot opens grouped PRs to
+  # reduce noise when multiple actions release on the same day.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -103,3 +130,23 @@ updates:
           - "*"
         exclude-patterns:
           - "actions/*"
+
+  # Keep pinned image tags and SHA digests current in Dockerfiles.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "docker"
+
+  # Docker Compose has its own Dependabot ecosystem.
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "docker"

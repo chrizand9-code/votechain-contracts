@@ -37,7 +37,8 @@ const GovernanceDashboard = React.lazy(() =>
   import('./pages/GovernanceDashboard').then((m) => ({ default: m.GovernanceDashboard ?? m.default }))
 );
 const Simulate = React.lazy(() => import('./pages/Simulate'));
-const WalletProfile = React.lazy(() => import('./pages/WalletProfile'));
+const CreateProposal = React.lazy(() => import('./pages/CreateProposal'));
+const Leaderboard = React.lazy(() => import('./pages/Leaderboard'));
 
 /** Updates the document title on route change (issue #16 — browser history / a11y). */
 function PageTitle({ title }: { title: string }) {
@@ -113,13 +114,13 @@ function AppRoutes() {
                 </ErrorBoundary>
               }
             />
-            {/* Issue #329 — wallet profile / vote delegation settings */}
+            {/* Issue #325 — Voter leaderboard */}
             <Route
-              path="/profile"
+              path="/leaderboard"
               element={
-                <ErrorBoundary section="WalletProfile">
-                  <PageTitle title="Wallet Profile" />
-                  <WalletProfile />
+                <ErrorBoundary section="Leaderboard">
+                  <PageTitle title="Leaderboard" />
+                  <Leaderboard />
                 </ErrorBoundary>
               }
             />

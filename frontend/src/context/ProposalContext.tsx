@@ -56,23 +56,35 @@ async function fetchProposals(): Promise<Proposal[]> {
 
 // ── Provider ─────────────────────────────────────────────────
 
-export function ProposalProvider({ children }: { children: React.ReactNode }) {
+interface ProposalProviderProps {
+  children: React.ReactNode;
+  /**
+   * Optional fetcher override — injected by unit tests to control the data
+   * source without MSW or network calls (issue #302).
+   * Defaults to the internal `fetchProposals` function.
+   */
+  fetcher?: () => Promise<Proposal[]>;
+}
+
+export function ProposalProvider({ children, fetcher }: ProposalProviderProps) {
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const load = fetcher ?? fetchProposals;
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchProposals();
+      const data = await load();
       setProposals(data);
     } catch (e: unknown) {
       setError((e as { message?: string })?.message ?? 'Failed to fetch proposals.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [load]);
 
   // Fetch on mount
   useEffect(() => {

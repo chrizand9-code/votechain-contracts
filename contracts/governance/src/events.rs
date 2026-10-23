@@ -14,7 +14,6 @@
 
 use crate::types::{ConfigKey, ProposalState, Vote};
 use soroban_sdk::{symbol_short, Address, Env, String};
-
 /// # Event Schema
 ///
 /// All events are published via `env.events().publish(topics, data)`.
@@ -210,5 +209,38 @@ pub fn voting_extended(env: &Env, id: u64, old_end_time: u64, new_end_time: u64)
     env.events().publish(
         (symbol_short!("vextend"), id),
         (old_end_time, new_end_time),
+    );
+}
+
+/// Emits a `tmplreg` event when an admin registers a proposal template.
+///
+/// Topics: `("tmplreg",)`
+/// Data: `(admin: Address, template_id: String)`
+pub fn template_registered(env: &Env, admin: &Address, template_id: &String) {
+    env.events().publish(
+        (symbol_short!("tmplreg"),),
+        (admin.clone(), template_id.clone()),
+    );
+}
+
+/// Emits a `tmplrm` event when an admin removes a proposal template.
+///
+/// Topics: `("tmplrm",)`
+/// Data: `(admin: Address, template_id: String)`
+pub fn template_removed(env: &Env, admin: &Address, template_id: &String) {
+    env.events().publish(
+        (symbol_short!("tmplrm"),),
+        (admin.clone(), template_id.clone()),
+    );
+}
+
+/// Emits a `tmclus` event when a proposal is created from a template.
+///
+/// Topics: `("tmplus", proposal_id)`
+/// Data: `(proposer: Address, template_id: String)`
+pub fn proposal_from_template(env: &Env, proposal_id: u64, proposer: &Address, template_id: &String) {
+    env.events().publish(
+        (symbol_short!("tmplus"), proposal_id),
+        (proposer.clone(), template_id.clone()),
     );
 }

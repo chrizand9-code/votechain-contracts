@@ -95,6 +95,53 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] }
+    },
+    {
+      "id": 6,
+      "title": "Indexer event lag (seconds)",
+      "description": "Time between a proposal on-chain finalise event and its appearance in the indexer. Alert fires when > 300s (5 min). See docs/mainnet-runbook.md#indexer-lag.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "indexer_event_lag_seconds",
+          "legendFormat": "event lag"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 120 },
+              { "color": "red", "value": 300 }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": { "mode": "line+area" }
+          }
+        },
+        "overrides": []
+      },
+      "alert": {
+        "name": "IndexerLagHigh",
+        "message": "Indexer event lag exceeds 5 minutes — proposal states may be stale. See runbook: docs/mainnet-runbook.md#indexer-lag",
+        "conditions": [
+          {
+            "type": "query",
+            "query": { "params": ["A", "5m", "now"] },
+            "reducer": { "type": "last", "params": [] },
+            "evaluator": { "type": "gt", "params": [300] }
+          }
+        ],
+        "executionErrorState": "alerting",
+        "noDataState": "no_data",
+        "frequency": "1m",
+        "for": "2m"
+      }
     }
   ],
   "templating": {

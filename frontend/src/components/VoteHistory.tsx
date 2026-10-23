@@ -37,6 +37,8 @@ export default function VoteHistory({ proposals }: Props) {
   const [fromDate, setFromDate] = useState('2025-01-01');
   const [toDate, setToDate] = useState('2026-12-31');
   const [stateFilter, setStateFilter] = useState<StateFilter>('All');
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState('');
 
   // Derive validation state (issue #17)
   const addressEmpty   = isStellarAddressEmpty(address);
@@ -61,17 +63,26 @@ export default function VoteHistory({ proposals }: Props) {
     return matched;
   }, [address, addressValid, proposals, fromDate, toDate, stateFilter]);
 
-  const exportVotes = () => {
-    const csv = generateCsv(votes.map((item) => item.vote));
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `vote-history-${address.replace(/\W/g, '_') || 'unknown'}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+  const exportVotes = async () => {
+    setIsExporting(true);
+    setExportError('');
+    try {
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+      const csv = generateCsv(votes.map((item) => item.vote));
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `vote-history-${address.replace(/\W/g, '_') || 'unknown'}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch {
+      setExportError('CSV export failed. Please try again.');
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   /** Determine what to show in the table body */
@@ -146,11 +157,19 @@ export default function VoteHistory({ proposals }: Props) {
         <button
           type="button"
           onClick={exportVotes}
-          disabled={votes.length === 0}
-          aria-disabled={votes.length === 0}
+          disabled={votes.length === 0 || isExporting}
+          aria-disabled={votes.length === 0 || isExporting}
         >
-          Export CSV
+          {isExporting ? (
+            <>
+              <progress aria-label="Exporting CSV" />
+              Exporting...
+            </>
+          ) : (
+            'Export CSV'
+          )}
         </button>
+        {exportError && <div role="alert" className="field-error">{exportError}</div>}
       </div>
       <form className="grid" onSubmit={(event) => event.preventDefault()}>
         <label>

@@ -1,0 +1,22 @@
+version: "3.9"
+services:
+  rpc-proxy:
+    image: nginx:alpine
+    environment:
+      UPSTREAM_URL: ${STELLAR_RPC_URL}
+    ports:
+      - "8080:8080"
+    networks:
+      - proxy-net
+  backend:
+    build: ./backend
+    environment:
+      STELLAR_RPC_URL: http://rpc-proxy:8080
+    networks:
+      - backend-net
+      - proxy-net
+    # no direct internet access
+networks:
+  backend-net:
+    internal: true
+  proxy-net: {}

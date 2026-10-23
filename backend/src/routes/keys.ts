@@ -55,7 +55,7 @@ function isValidDaoId(daoId: unknown): daoId is string {
 
 // ── POST /api/keys — Create a new key ─────────────────────────────────────
 
-router.post("/", (req: Request, res: Response) => {
+router.post("/", async (req: Request, res: Response) => {
   const { daoId, tier } = req.body as { daoId?: unknown; tier?: unknown };
 
   if (!isValidDaoId(daoId)) {
@@ -73,7 +73,7 @@ router.post("/", (req: Request, res: Response) => {
       ? (tier as ApiKeyTier)
       : "verified-dao";
 
-  const { record, rawKey } = createApiKey(daoId.trim(), resolvedTier);
+  const { record, rawKey } = await createApiKey(daoId.trim(), resolvedTier);
 
   // HTTP 201 — include the raw key in the response body (only time it's shown)
   return res.status(201).json({
@@ -105,9 +105,9 @@ router.get("/:id", (req: Request, res: Response) => {
 
 // ── POST /api/keys/:id/rotate — Rotate a key ──────────────────────────────
 
-router.post("/:id/rotate", (req: Request, res: Response) => {
+router.post("/:id/rotate", async (req: Request, res: Response) => {
   try {
-    const { record, rawKey } = rotateApiKey(req.params.id);
+    const { record, rawKey } = await rotateApiKey(req.params.id);
     return res.json({
       ...record,
       rawKey,

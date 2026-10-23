@@ -55,6 +55,37 @@
     "notConfirmed": "Transaction not confirmed after 60 seconds.",
     "networkError": "Network error while checking transaction."
   },
+  "createProposal": {
+    "heading": "Create a New Proposal",
+    "formLabel": "Create proposal form",
+    "titleLabel": "Title",
+    "titlePlaceholder": "Enter a clear, concise proposal title",
+    "descriptionLabel": "Description",
+    "descriptionPlaceholder": "Describe what this proposal aims to achieve and why",
+    "quorumLabel": "Quorum (minimum total vote weight)",
+    "quorumPlaceholder": "e.g. 5000000",
+    "quorumHint": "Minimum total vote weight required for the proposal to be finalisable",
+    "durationLabel": "Voting duration (seconds)",
+    "durationPlaceholder": "e.g. 604800",
+    "durationHint": "Between {{min}} and {{max}} seconds (1 minute – 30 days)",
+    "durationPresets": "Quick duration presets",
+    "submitButton": "Submit Proposal",
+    "submittingButton": "Submitting…",
+    "cancelButton": "Cancel",
+    "submitError": "Submission failed (HTTP {{status}}). Please try again.",
+    "submitErrorGeneric": "An unexpected error occurred. Please try again.",
+    "successMessage": "Proposal #{{id}} created successfully. Redirecting…",
+    "validation": {
+      "titleRequired": "Title is required.",
+      "titleMax": "Title must be {{max}} characters or fewer.",
+      "descriptionRequired": "Description is required.",
+      "descriptionMax": "Description must be {{max}} characters or fewer.",
+      "quorumRequired": "Quorum is required.",
+      "quorumPositive": "Quorum must be a positive integer.",
+      "durationRequired": "Duration is required.",
+      "durationRange": "Duration must be between {{min}} and {{max}} seconds."
+    }
+  },
   "history": {
     "title": "Wallet vote history",
     "description": "View votes cast by any public address without a wallet connection.",

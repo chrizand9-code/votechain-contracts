@@ -41,6 +41,8 @@
 
 #![allow(dead_code)]
 
+use crate::storage::{balance_of, get_stake_record, remove_stake_record, set_stake_record};
+use crate::types::ContractError;
 use soroban_sdk::{contracttype, Address, Env};
 
 // ---------------------------------------------------------------------------
@@ -198,17 +200,57 @@ pub fn voting_power_multiplier(lock_duration_days: u64) -> i128 {
 /// - [ ] Emit staking event via `events` module
 /// - [ ] Add `AlreadyStaked` and `InvalidLockDuration` variants to `ContractError`
 /// - [ ] Write unit tests covering happy path and all error branches
-#[allow(unused_variables)]
-pub fn stake(env: &Env, staker: Address, amount: i128, lock_duration_seconds: u64) {
-    // TODO: staker.require_auth();
-    // TODO: validate amount > 0
-    // TODO: validate lock_duration_seconds <= MAX_LOCK_DAYS * SECONDS_PER_DAY
-    // TODO: check staker transferable balance >= amount
-    // TODO: deduct amount from transferable balance in storage
-    // TODO: compute locked_until = env.ledger().timestamp() + lock_duration_seconds
-    // TODO: write StakeRecord to persistent storage
-    // TODO: emit stake event
-    todo!("stake() not yet implemented — see ADR-013")
+pub fn stake(
+    env: &Env,
+    staker: Address,
+    amount: i128,
+    lock_duration_seconds: u64,
+) -> Result<(), ContractError> {
+    staker.require_auth();
+
+    if amount <= 0 {
+        return Err(ContractError::InvalidAmount);
+    }
+
+    // SEC-013 §5: reject lock durations beyond the maximum before any
+    // arithmetic is attempted, and use checked_add to prevent a silent
+    // overflow/wrap of `locked_until`.
+    let max_lock_seconds = MAX_LOCK_DAYS * SECONDS_PER_DAY;
+    if lock_duration_seconds > max_lock_seconds {
+        return Err(ContractError::InvalidLockDuration);
+    }
+
+    if get_stake_record(env, &staker).is_some() {
+        return Err(ContractError::AlreadyStaked);
+    }
+
+    // SEC-013 §2: only the transferable (unstaked) portion of the balance may
+    // be newly staked — this is always the full balance here since a staker
+    // may not have a second concurrent position (checked above), but the
+    // helper is reused for consistency with transfer/transfer_from.
+    let balance = balance_of(env, &staker);
+    if transferable_balance(env, &staker, balance) < amount {
+        return Err(ContractError::InsufficientBalance);
+    }
+
+    let locked_until = env
+        .ledger()
+        .timestamp()
+        .checked_add(lock_duration_seconds)
+        .ok_or(ContractError::ArithmeticOverflow)?;
+
+    set_stake_record(
+        env,
+        &staker,
+        &StakeRecord {
+            staker: staker.clone(),
+            amount,
+            lock_duration: lock_duration_seconds,
+            locked_until,
+        },
+    );
+
+    Ok(())
 }
 
 /// Release a staking position once the lock period has expired, restoring
@@ -235,15 +277,18 @@ pub fn stake(env: &Env, staker: Address, amount: i128, lock_duration_seconds: u6
 /// - [ ] Add `StakeNotFound` and `StakeLocked` variants to `ContractError`
 /// - [ ] Emit unstake event via `events` module
 /// - [ ] Write unit tests covering happy path and locked-too-early error
-#[allow(unused_variables)]
-pub fn unstake(env: &Env, staker: Address) {
-    // TODO: staker.require_auth();
-    // TODO: load StakeRecord for staker — error if absent
-    // TODO: assert env.ledger().timestamp() >= record.locked_until
-    // TODO: restore record.amount to transferable balance
-    // TODO: delete StakeRecord from persistent storage
-    // TODO: emit unstake event
-    todo!("unstake() not yet implemented — see ADR-013")
+pub fn unstake(env: &Env, staker: Address) -> Result<(), ContractError> {
+    staker.require_auth();
+
+    let record = get_stake_record(env, &staker).ok_or(ContractError::StakeNotFound)?;
+
+    // SEC-013 §5 / summary table: lock must have fully elapsed.
+    if env.ledger().timestamp() < record.locked_until {
+        return Err(ContractError::StakeLocked);
+    }
+
+    remove_stake_record(env, &staker);
+    Ok(())
 }
 
 /// Return the effective voting power for `staker`, accounting for any active
@@ -279,16 +324,44 @@ pub fn unstake(env: &Env, staker: Address) {
 /// - [ ] Integrate with `cast_vote` in the governance contract to replace
 ///       `token_client.balance(&voter)` with `token_client.staked_voting_power(&voter)`
 /// - [ ] Write unit tests comparing raw balance vs staked voting power
-#[allow(unused_variables)]
 pub fn staked_voting_power(env: &Env, staker: Address) -> i128 {
-    // TODO: load raw balance for staker
-    // TODO: attempt to load StakeRecord for staker
-    // TODO: if no stake record, return raw balance unchanged (1× multiplier)
-    // TODO: compute lock_duration_days = record.lock_duration / SECONDS_PER_DAY
-    // TODO: multiplier = voting_power_multiplier(lock_duration_days)
-    // TODO: staked_power = record.amount * multiplier / MULTIPLIER_PRECISION
-    // TODO: return staked_power + (raw_balance - record.amount)  [unstaked portion at 1×]
-    todo!("staked_voting_power() not yet implemented — see ADR-013")
+    let raw_balance = balance_of(env, &staker);
+
+    // SEC-013 §4: no balance means no voting power, regardless of any
+    // (necessarily stale) stake record.
+    if raw_balance == 0 {
+        return 0;
+    }
+
+    let record = match get_stake_record(env, &staker) {
+        Some(r) => r,
+        None => return raw_balance,
+    };
+
+    // SEC-013 §4: cap the staked amount at the current balance so a stale or
+    // inconsistent record can never grant more voting power than the holder
+    // actually has.
+    let effective_staked = record.amount.min(raw_balance);
+    let lock_duration_days = record.lock_duration / SECONDS_PER_DAY;
+    let multiplier = voting_power_multiplier(lock_duration_days);
+    let staked_power = effective_staked * multiplier / MULTIPLIER_PRECISION;
+    let unstaked_power = raw_balance - effective_staked;
+    staked_power + unstaked_power
+}
+
+/// SEC-013 §2: Returns the portion of `balance` that is free to move for
+/// `owner` right now, i.e. `balance` minus any amount still locked under an
+/// active [`StakeRecord`]. Used by `transfer` and `transfer_from` to enforce
+/// the lock invariant — tokens committed to a stake cannot be transferred
+/// (directly or via an allowance) until the lock expires.
+pub fn transferable_balance(env: &Env, owner: &Address, balance: i128) -> i128 {
+    match get_stake_record(env, owner) {
+        Some(record) if env.ledger().timestamp() < record.locked_until => {
+            let locked = record.amount.min(balance);
+            balance - locked
+        }
+        _ => balance,
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -3,15 +3,24 @@
   "version": "0.1.0",
   "private": true,
   "license": "Apache-2.0",
-  "description": "Optional Discord bot posting VoteChain governance events",
+  "description": "Optional bot posting VoteChain governance events to Discord and Telegram",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc index.ts --outDir dist --target es2020 --module commonjs --lib es2020,dom --types node",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "test": "jest --passWithNoTests"
   },
   "devDependencies": {
+    "@types/jest": "^29.5.0",
     "@types/node": "^20.0.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.0",
     "typescript": "^5.4.0"
   },
-  "engines": { "node": ">=18" }
+  "engines": { "node": ">=18" },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "testMatch": ["**/*.test.ts"]
+  }
 }

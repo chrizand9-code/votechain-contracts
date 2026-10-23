@@ -335,6 +335,14 @@ Vote weight = sum of (balance_i × multiplier_i)
 - [ ] Implement `add_voting_token()`, `remove_voting_token()`, `set_token_weight()`
 - [ ] Add tests for multi-token scenarios
 - [ ] Update ADR with implementation notes
+- [ ] **Security (issue #309, SEC-014):** implement the per-token balance
+      snapshot at proposal-creation time referenced in §7.3 and in
+      [SEC-014](security/SEC-014-multi-asset-flash-loan-analysis.md) before
+      this phase ships, rather than as a later follow-up — the cross-
+      transaction token-recycling risk scales with the number of registered
+      tokens and their weight multipliers, so it should be closed up front
+      instead of inheriting the single-token "accepted residual risk" status
+      (KI-001) for N tokens at once.
 
 ### Phase 2: Governance-Driven Token Management (v0.2.1) — PROPOSED
 
@@ -385,7 +393,7 @@ Vote weight = sum of (balance_i × multiplier_i)
 - Soroban atomic execution prevents same-transaction exploitation.
 - Per-token balance snapshots (future enhancement) would prevent this entirely.
 
-**Impact:** None for same-transaction; residual cross-transaction risk (same as v0.1.x).
+**Impact:** None for same-transaction; residual cross-transaction risk (same as v0.1.x), but amplified relative to v0.1.x because weight is additive across every token in `VotingTokenConfig` — an attacker only needs to source the cheapest/most-liquid registered token, not the DAO's primary governance token specifically. See [SEC-014](security/SEC-014-multi-asset-flash-loan-analysis.md) for the full pre-implementation analysis (issue #309), which rates this **High** pending mitigation and recommends the snapshot option be a blocking requirement for Phase 1 rather than a later enhancement.
 
 ### 7.4 Semantic Validation: Token Address Duplication
 

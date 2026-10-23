@@ -146,6 +146,17 @@ const TTL = {
   PROPOSAL_ITEM: parseInt(process.env.PROPOSAL_ITEM_TTL ?? "10", 10),
 };
 
+export const LEADERBOARD_CACHE_TTL_SECONDS = Number(
+  process.env.LEADERBOARD_CACHE_TTL ?? 60,
+);
+
+if (
+  !Number.isSafeInteger(LEADERBOARD_CACHE_TTL_SECONDS) ||
+  LEADERBOARD_CACHE_TTL_SECONDS <= 0
+) {
+  throw new Error("LEADERBOARD_CACHE_TTL must be a positive integer.");
+}
+
 // ── Cache key helpers ──────────────────────────────────────────────────────
 
 const KEY = {
@@ -165,7 +176,10 @@ const KEY = {
 function cacheMiddleware(keyFn: (req: Request) => string, ttl: number) {
   return async (req: Request, res: Response, next: NextFunction) => {
     // Bypass cache entirely when Redis is unavailable (#38)
-    if (!isRedisReady() || !redis) return next();
+    if (!isRedisReady() || !redis) {
+      res.setHeader("X-Cache", "MISS");
+      return next();
+    }
 
     const key = keyFn(req);
     try {
@@ -179,6 +193,7 @@ function cacheMiddleware(keyFn: (req: Request) => string, ttl: number) {
     } catch (err) {
       log("error", "redis get error", { error: String(err) });
       // Fall through on error — degrade gracefully
+      res.setHeader("X-Cache", "MISS");
       return next();
     }
 
@@ -211,6 +226,11 @@ export const cacheProposalList = cacheMiddleware(
 export const cacheProposalItem = cacheMiddleware(
   (req) => KEY.item(req.params.id),
   TTL.PROPOSAL_ITEM
+);
+
+export const cacheLeaderboardResponse = cacheMiddleware(
+  (req) => `leaderboard:response:${req.originalUrl}`,
+  LEADERBOARD_CACHE_TTL_SECONDS,
 );
 
 // ── Cache invalidation ─────────────────────────────────────────────────────

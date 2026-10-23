@@ -668,3 +668,55 @@ healthcheck:
 ```
 
 This means other services that use `depends_on: backend` with a `condition: service_healthy` will wait until the backend reports healthy before starting.
+
+---
+
+## Troubleshooting
+
+Common failure modes encountered during local, Docker, and CI setup. Each entry includes the exact error message snippet for searchability. See also the [FAQ](faq.md).
+
+### Local Environment
+
+1. **Wrong Rust version**
+   - Error: `error: package requires rustc 1.75.0 or newer`
+   - Fix: `rustup update stable && rustup default stable`
+
+2. **WASM target missing**
+   - Error: `error[E0463]: can't find crate for core (target: wasm32-unknown-unknown)`
+   - Fix: `rustup target add wasm32-unknown-unknown`
+
+3. **Stellar CLI version mismatch**
+   - Error: `error: unknown command 'contract'` or `stellar: command not found`
+   - Fix: `cargo install --locked stellar-cli --features opt`
+
+4. **Cargo lock mismatch**
+   - Error: `error: the lock file ... needs to be updated`
+   - Fix: `cargo update` then re-run tests.
+
+5. **Permission denied on cargo bin**
+   - Error: `Permission denied (os error 13)`
+   - Fix: `chmod +x ~/.cargo/bin/*` and add to PATH.
+
+### Docker
+
+6. **Docker networking issues**
+   - Error: `Cannot connect to the Docker daemon`
+   - Fix: Start Docker service: `sudo systemctl start docker`.
+
+7. **Container cannot reach RPC**
+   - Error: `connection refused` to Stellar RPC
+   - Fix: Use host networking or configure proxy URL in `.env`.
+
+8. **Volume mount permission errors**
+   - Error: `Permission denied` on mounted volumes
+   - Fix: `chown -R $USER:$USER .` or run with `--user`.
+
+### CI
+
+9. **CI cache miss / slow builds**
+   - Error: `cache not found` in workflow logs
+   - Fix: Re-run workflow; ensure `Cargo.lock` committed.
+
+10. **Missing secrets in CI**
+    - Error: `secret not found` / empty env var
+    - Fix: Add required secrets in repo settings.

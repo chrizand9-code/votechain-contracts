@@ -163,7 +163,7 @@ describe("apiKeyAuth", () => {
 
   describe("verified-DAO key requests", () => {
     it("proceeds with verified-dao tier for a valid key", async () => {
-      const { rawKey, record } = createApiKey("test-dao");
+      const { rawKey, record } = await createApiKey("test-dao");
       const req = makeReq({ headers: { authorization: `Bearer ${rawKey}` } });
       const { res } = makeResWithCtx();
       const next = vi.fn();
@@ -176,7 +176,7 @@ describe("apiKeyAuth", () => {
     });
 
     it("sets X-RateLimit-Limit=1000 for verified-dao GET", async () => {
-      const { rawKey } = createApiKey("limits-dao");
+      const { rawKey } = await createApiKey("limits-dao");
       const req = makeReq({ method: "GET", headers: { authorization: `Bearer ${rawKey}` } });
       const { res, ctx } = makeResWithCtx();
 
@@ -187,7 +187,7 @@ describe("apiKeyAuth", () => {
     });
 
     it("sets X-RateLimit-Limit=100 for verified-dao POST", async () => {
-      const { rawKey } = createApiKey("limits-dao-2");
+      const { rawKey } = await createApiKey("limits-dao-2");
       const req = makeReq({ method: "POST", headers: { authorization: `Bearer ${rawKey}` } });
       const { res, ctx } = makeResWithCtx();
 
@@ -197,7 +197,7 @@ describe("apiKeyAuth", () => {
     });
 
     it("rate-limits a key after 1000 reads in one window", async () => {
-      const { rawKey } = createApiKey("heavy-reader-dao");
+      const { rawKey } = await createApiKey("heavy-reader-dao");
       const next = vi.fn();
 
       for (let i = 0; i < 1000; i++) {
@@ -234,7 +234,7 @@ describe("apiKeyAuth", () => {
     });
 
     it("returns 401 for a revoked key (indistinguishable from unknown key)", async () => {
-      const { rawKey, record } = createApiKey("revoke-dao");
+      const { rawKey, record } = await createApiKey("revoke-dao");
       revokeApiKey(record.id);
 
       const req = makeReq({ headers: { authorization: `Bearer ${rawKey}` } });
@@ -251,7 +251,7 @@ describe("apiKeyAuth", () => {
     });
 
     it("returns 403 SUSPENDED_KEY for a suspended key", async () => {
-      const { rawKey, record } = createApiKey("suspend-dao");
+      const { rawKey, record } = await createApiKey("suspend-dao");
       suspendApiKey(record.id);
 
       const req = makeReq({ headers: { authorization: `Bearer ${rawKey}` } });
@@ -379,8 +379,8 @@ describe("abuseDetection", () => {
     expect(state!.anomalousStreak).toBe(0);
   });
 
-  it("suspends a key via suspendApiKey and getApiKeyById reflects suspension", () => {
-    const { record } = createApiKey("abuse-victim-dao");
+  it("suspends a key via suspendApiKey and getApiKeyById reflects suspension", async () => {
+    const { record } = await createApiKey("abuse-victim-dao");
     const keyId = record.id;
 
     suspendApiKey(keyId);
@@ -412,7 +412,7 @@ describe("apiKeyAuth + abuseDetection pipeline", () => {
   });
 
   it("apiKeyAuth sets req.apiKeyId which abuseDetection then tracks", async () => {
-    const { rawKey, record } = createApiKey("pipeline-dao");
+    const { rawKey, record } = await createApiKey("pipeline-dao");
     const next = vi.fn();
 
     // Simulate middleware chaining manually
@@ -441,7 +441,7 @@ describe("apiKeyAuth + abuseDetection pipeline", () => {
   });
 
   it("suspended keys are blocked by apiKeyAuth — abuseDetection never runs", async () => {
-    const { rawKey, record } = createApiKey("blocked-pipeline-dao");
+    const { rawKey, record } = await createApiKey("blocked-pipeline-dao");
     suspendApiKey(record.id);
 
     const req = makeReq({ headers: { authorization: `Bearer ${rawKey}` } });
@@ -458,7 +458,7 @@ describe("apiKeyAuth + abuseDetection pipeline", () => {
   });
 
   it("read and write requests for the same key use separate rate-limit buckets", async () => {
-    const { rawKey } = createApiKey("bucket-isolation-dao");
+    const { rawKey } = await createApiKey("bucket-isolation-dao");
     const next = vi.fn();
 
     // POST (write bucket) — 10 requests should all pass

@@ -14,7 +14,7 @@
 
 import { Router, Request, Response } from 'express';
 import { getLeaderboard, getVoterStats } from '../services/leaderboardService';
-import { getRedis } from '../middleware/redisCache';
+import { cacheLeaderboardResponse, getRedis } from '../middleware/redisCache';
 
 const router = Router();
 
@@ -36,9 +36,9 @@ const router = Router();
  *   ]
  * }
  */
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', cacheLeaderboardResponse, async (req: Request, res: Response) => {
   try {
-    const leaderboard = await getLeaderboard(getRedis());
+    const leaderboard = await getLeaderboard(getRedis(), req.originalUrl);
 
     // Add rank to each entry
     const ranked = leaderboard.map((entry, index) => ({

@@ -20,9 +20,12 @@ import { connectRedis, getRedis } from "./middleware/redisCache";
 import { requestTracing } from "./middleware/requestTracing";
 import { apiKeyAuth } from "./middleware/apiKeyAuth";
 import { rateLimit } from "./middleware/rateLimit";
+import { jsonBodyParser } from "./middleware/jsonBodyParser";
 import healthRoutes from "./routes/health";
 import proposalRoutes from "./routes/proposals";
+import leaderboardRoutes from "./routes/leaderboard";
 import apiKeysRoutes from "./routes/apiKeys";
+import adminAuditLogRoutes from "./routes/adminAuditLog";
 import {
   notFoundHandler,
   globalErrorHandler,
@@ -98,8 +101,21 @@ const corsOptions: cors.CorsOptions = {
 
 const app = express();
 
-// Security headers — must come before routes
-app.use(helmet());
+// Security headers — must come before routes.
+// helmet()'s defaults don't match our baseline hardening requirements
+// (HSTS max-age, Referrer-Policy), so they're set explicitly here.
+// See docs/security/SEC-012-content-security-policy.md for the CSP policy.
+app.use(
+  helmet({
+    hsts: {
+      maxAge: 31536000, // 1 year, in seconds
+      includeSubDomains: true,
+    },
+    frameguard: { action: "deny" }, // X-Frame-Options: DENY
+    noSniff: true, // X-Content-Type-Options: nosniff
+    referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+  })
+);
 
 // Handle preflight OPTIONS for all routes
 app.options("*", cors(corsOptions));
@@ -107,13 +123,17 @@ app.use(cors(corsOptions));
 
 app.use(requestTracing);
 app.use(metricsMiddleware);
-app.use(express.json());
+app.use(jsonBodyParser());
 
 // Health, readiness and metrics — mounted BEFORE rate-limiting and auth so
 // load balancers, orchestrators and Prometheus can always reach them without
 // credentials.
 app.get("/metrics", metricsHandler);
 app.use("/", healthRoutes);
+
+// CSP violation reports forwarded by Nginx (SEC-012) — mounted before auth
+// since the browser-originated report never carries an API key.
+app.use("/", cspReportRoutes);
 
 // ── API key authentication & tiered rate limiting ──────────────────────────
 //
@@ -128,7 +148,9 @@ app.use("/api", rateLimit);
 
 // ── Routes ─────────────────────────────────────────────────────────────────
 app.use("/api", proposalRoutes);
+app.use("/api/leaderboard", leaderboardRoutes);
 app.use("/api", apiKeysRoutes);
+app.use("/api", adminAuditLogRoutes);
 
 // Catch unmatched routes — must come after all real route registrations.
 app.use(notFoundHandler);

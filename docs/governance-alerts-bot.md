@@ -1,7 +1,11 @@
 # Governance Alerts Bot — Operator Manual
 
-An optional bot that posts VoteChain governance events to a Discord channel. It is
-**not** part of `docker-compose.yml` and must be run separately.
+An optional bot that posts VoteChain governance events to Discord and/or
+Telegram. It is **not** part of `docker-compose.yml` and must be run separately.
+
+At least one notification channel must be configured — Discord, Telegram, or
+both. When both are set, alerts are delivered to every channel in parallel so
+a slow response from one provider never delays the others.
 
 Source: [`bots/governance-alerts`](../bots/governance-alerts)
 
@@ -36,10 +40,14 @@ significant change.
  │            │ ◄────────────────────── │  (backend)      │                  │ channel │
  │            │   JSON proposal list    └─────────────────┘                  │         │
  │            │ ─────────────────────────────────────────────────────────── ►│         │
- └────────────┘                                                               └─────────┘
+ │            │                                                               └─────────┘
+ │            │   Bot API POST    ┌─────────────────┐
+ │            │ ────────────────► │  Telegram API  │ ──►  Telegram chat
+ └────────────┘                   └─────────────────┘
 ```
 
-**Requirements:** Node.js ≥ 18, npm, network access to the API and Discord.
+**Requirements:** Node.js ≥ 18, npm, network access to the API and at least one
+notification provider (Discord and/or Telegram).
 
 ---
 
@@ -50,15 +58,28 @@ version control.**
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `DISCORD_WEBHOOK_URL` | **yes** | — | Discord incoming webhook URL. Obtain from **Channel settings → Integrations → Webhooks → New Webhook**. Treat as a secret. |
+| `DISCORD_WEBHOOK_URL` | no\* | — | Discord incoming webhook URL. Obtain from **Channel settings → Integrations → Webhooks → New Webhook**. Treat as a secret. |
+| `TELEGRAM_BOT_TOKEN` | no\* | — | Telegram Bot API token. Obtain from [@BotFather](https://t.me/BotFather) by sending `/newbot`. Treat as a secret. |
+| `TELEGRAM_CHAT_ID` | no\* | — | Telegram chat or channel ID to send alerts to. For channels, use the `@channelusername` or numeric ID (e.g. `-1001234567890`). |
 | `API_URL` | no | `http://localhost:3001` | Base URL of the VoteChain backend API (no trailing slash). |
 | `FRONTEND_URL` | no | `http://localhost:3000` | Base URL of the VoteChain frontend. Used to construct proposal deep-links included in alerts. |
 | `POLL_INTERVAL_MS` | no | `30000` | How often (in milliseconds) to poll `GET /proposals`. Minimum recommended value is `10000` (10 s). Setting this below 5 s may cause rate-limiting on the API. |
 
+\* At least one channel must be configured: `DISCORD_WEBHOOK_URL` for Discord,
+or both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` for Telegram. The bot exits
+at startup if no channel is configured.
+
 ### Example `.env` file (never commit this)
 
 ```dotenv
+# Discord (optional)
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/123456789/AbCdEfGhIjKlMnOpQrStUvWx
+
+# Telegram (optional)
+TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
+TELEGRAM_CHAT_ID=-1001234567890
+
+# Shared
 API_URL=https://api.votechain.example.com
 FRONTEND_URL=https://app.votechain.example.com
 POLL_INTERVAL_MS=30000
@@ -95,6 +116,26 @@ https://app.votechain.example.com/proposals/42
 }
 ```
 
+**Telegram message (Markdown):**
+
+```
+🗳️ *New proposal created*
+*#42* — Increase quorum threshold to 10%
+State: `active`
+[View proposal](https://app.votechain.example.com/proposals/42)
+```
+
+**Bot API body sent to Telegram:**
+
+```json
+{
+  "chat_id": "-1001234567890",
+  "text": "🗳️ *New proposal created*\n*#42* — Increase quorum threshold to 10%\nState: `active`\n[View proposal](https://app.votechain.example.com/proposals/42)",
+  "parse_mode": "Markdown",
+  "disable_web_page_preview": true
+}
+```
+
 ---
 
 ### `ProposalFinalised`
@@ -123,6 +164,15 @@ https://app.votechain.example.com/proposals/42
 }
 ```
 
+**Telegram message (Markdown):**
+
+```
+✅ *Proposal finalised*
+*#42* — Increase quorum threshold to 10%
+State: `rejected`
+[View proposal](https://app.votechain.example.com/proposals/42)
+```
+
 ---
 
 ### `ProposalExecuted`
@@ -147,6 +197,15 @@ https://app.votechain.example.com/proposals/42
 {
   "content": "🚀 **Proposal executed**\n**#42** — Increase quorum threshold to 10%\nState: `executed`\nhttps://app.votechain.example.com/proposals/42"
 }
+```
+
+**Telegram message (Markdown):**
+
+```
+🚀 *Proposal executed*
+*#42* — Increase quorum threshold to 10%
+State: `executed`
+[View proposal](https://app.votechain.example.com/proposals/42)
 ```
 
 ---
@@ -193,6 +252,8 @@ sudo chown -R votechain-bot:votechain-bot /opt/votechain-bot
 ```bash
 sudo tee /etc/votechain-bot.env > /dev/null <<'EOF'
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/YOUR_WEBHOOK_URL
+TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
+TELEGRAM_CHAT_ID=-1001234567890
 API_URL=https://api.votechain.example.com
 FRONTEND_URL=https://app.votechain.example.com
 POLL_INTERVAL_MS=30000
@@ -278,7 +339,7 @@ aws lambda create-function \
 # Set environment variables
 aws lambda update-function-configuration \
   --function-name votechain-governance-alerts \
-  --environment "Variables={DISCORD_WEBHOOK_URL=...,API_URL=...,FRONTEND_URL=...}"
+  --environment "Variables={DISCORD_WEBHOOK_URL=...,TELEGRAM_BOT_TOKEN=...,TELEGRAM_CHAT_ID=...,API_URL=...,FRONTEND_URL=...}"
 ```
 
 **4. Add an EventBridge (CloudWatch Events) rule to trigger every 30 seconds:**
@@ -323,6 +384,8 @@ docker run -d \
   --name votechain-bot \
   --restart unless-stopped \
   -e DISCORD_WEBHOOK_URL="$DISCORD_WEBHOOK_URL" \
+  -e TELEGRAM_BOT_TOKEN="$TELEGRAM_BOT_TOKEN" \
+  -e TELEGRAM_CHAT_ID="$TELEGRAM_CHAT_ID" \
   -e API_URL="https://api.votechain.example.com" \
   -e FRONTEND_URL="https://app.votechain.example.com" \
   -e POLL_INTERVAL_MS=30000 \
@@ -349,7 +412,9 @@ the Node.js process timestamp when piped through journald or a log aggregator.
 | `Poll failed: FetchError: ECONNREFUSED` | The API host is unreachable. Check `API_URL` and network/firewall rules. |
 | `Discord webhook failed: 401 ...` | Webhook URL is invalid or was revoked. Regenerate the webhook in Discord and update `DISCORD_WEBHOOK_URL`. |
 | `Discord webhook failed: 429 ...` | Discord rate-limit hit. Increase `POLL_INTERVAL_MS` to reduce posting frequency. |
-| `DISCORD_WEBHOOK_URL is required` | Bot exited at startup because the required env var was missing. Set the variable and restart. |
+| `Telegram post failed: 401 ...` | Bot token is invalid. Re-create the token via @BotFather and update `TELEGRAM_BOT_TOKEN`. |
+| `Telegram post failed: 400 ...` | `TELEGRAM_CHAT_ID` is wrong or the bot has not been added to the target chat/channel. |
+| `No notification channel configured ...` | Bot exited at startup — no channel configured. Set at least one of `DISCORD_WEBHOOK_URL` or `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`. |
 
 ---
 
@@ -439,25 +504,15 @@ memory growth, restart the bot periodically during maintenance windows.
 
 ## Extending to Other Channels
 
-### Telegram
+### Telegram (built-in since issue #323)
 
-Replace the `post()` function in `index.ts` with a call to the Telegram Bot API:
+Telegram is supported natively alongside Discord. Set `TELEGRAM_BOT_TOKEN`
+and `TELEGRAM_CHAT_ID` and the bot will post to both channels in parallel.
+Messages are formatted with Telegram Markdown (`parse_mode=Markdown`), using
+single-asterisk bold (`*text*`) and Markdown links (`[text](url)`) rather
+than the Discord double-asterisk syntax.
 
-```typescript
-async function post(content: string): Promise<void> {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
-  const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text: content, parse_mode: "Markdown" }),
-  });
-  if (!res.ok) console.error(`Telegram post failed: ${res.status}`);
-}
-```
-
-Add `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` to the configuration table above
-and treat them as secrets.
+See [Configuration Reference](#configuration-reference) above for details.
 
 ### Slack
 

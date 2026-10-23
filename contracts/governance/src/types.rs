@@ -117,6 +117,14 @@ pub enum ContractError {
     CommentHashTooLong = 48,
     /// 49 – Delegation would create a cycle
     CircularDelegation = 49,
+    /// 50 – Proposal template with the given ID does not exist
+    TemplateNotFound = 50,
+    /// 51 – A template with this ID has already been registered
+    TemplateAlreadyExists = 51,
+    /// 52 – Template ID is empty or exceeds the maximum allowed length
+    InvalidTemplateId = 52,
+    /// 53 – New quorum is below the configured minimum quorum floor (MIN_QUORUM_BPS)
+    QuorumBelowFloor = 53,
 }
 
 /// Different types of proposals the governance contract supports.
@@ -254,6 +262,50 @@ pub struct VotingTokenConfig {
     /// Weight multiplier for votes from this token (e.g., 100 = 1x, 200 = 2x)
     /// Allows different tokens to have different voting influence
     pub weight_multiplier: u64,
+}
+
+/// A pre-approved proposal template that standardises governance proposals.
+///
+/// Registered by the admin via [`register_template`], templates store default
+/// values and a parameter schema that can be used to create proposals with
+/// `create_proposal_from_template`.
+///
+/// # Storage
+/// Templates are stored in **persistent storage** keyed by their string ID,
+/// so they survive ledger expiry and persist until explicitly removed.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ProposalTemplate {
+    /// Unique human-readable identifier for the template (e.g. "treasury-allocation").
+    pub template_id: String,
+    /// Default proposal title (may contain placeholder markers).
+    pub title: String,
+    /// Default proposal description (may contain placeholder markers).
+    pub description: String,
+    /// Default quorum value; 0 means the caller must supply it.
+    pub quorum: i128,
+    /// Default voting duration in seconds; 0 means the caller must supply it.
+    pub duration: u64,
+    /// Address of the admin who registered the template.
+    pub registered_by: Address,
+    /// Unix timestamp at which the template was registered.
+    pub registered_at: u64,
+}
+
+/// Parameters supplied by a proposer when creating a proposal from a template.
+///
+/// Fields set to `None` fall back to the template's default value.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct TemplateProposalParams {
+    /// Overrides the template title if provided.
+    pub title: Option<String>,
+    /// Overrides the template description if provided.
+    pub description: Option<String>,
+    /// Overrides the template quorum if provided.
+    pub quorum: Option<i128>,
+    /// Overrides the template duration if provided.
+    pub duration: Option<u64>,
 }
 ///
 /// Every storage entry is keyed by a variant of this enum.  Because Soroban
@@ -401,6 +453,16 @@ pub enum DataKey {
     /// Whether `proposal_id`'s voting period has already been extended once (persistent storage).
     /// Key space: one entry per unique proposal ID. Absence means "not yet extended".
     ProposalExtended(u64),
+
+    /// A registered proposal template keyed by its string ID (persistent storage).
+    /// Key space: one entry per unique template ID string.
+    /// See [`ProposalTemplate`] for the stored struct.
+    ProposalTemplate(String),
+
+    /// Minimum quorum floor in basis points (instance storage).
+    /// `0` means use the default of `MIN_QUORUM_BPS` (10 = 0.1% of supply).
+    /// Set during `initialize`; enforced by `update_quorum`.
+    MinQuorumBps,
 }
 
 #[contracttype]
@@ -442,4 +504,6 @@ pub struct ContractConfig {
     pub max_duration: u64,
     /// Contract semantic version as `(major, minor, patch)`.
     pub version: (u32, u32, u32),
+    /// Minimum quorum floor in basis points (e.g. 10 = 0.1 % of total supply).
+    pub min_quorum_bps: u32,
 }

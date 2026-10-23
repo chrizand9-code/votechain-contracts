@@ -52,4 +52,19 @@ test.describe('Vote history CSV export', () => {
       expect(download.suggestedFilename()).toMatch(/vote-history.*\.csv/i);
     }
   });
+
+  test('shows export progress and disables the button while exporting', async ({ page }) => {
+    await page.goto('/history');
+    const input = page.getByPlaceholder(/enter public address/i);
+    if (!(await input.isVisible())) return;
+
+    await input.fill(VALID_ADDRESS);
+    const exportButton = page.getByRole('button', { name: /export csv/i });
+    if (!(await exportButton.isEnabled())) return;
+
+    const clickPromise = exportButton.click();
+    await expect(page.getByRole('progressbar', { name: 'Exporting CSV' })).toBeVisible();
+    await expect(exportButton).toBeDisabled();
+    await clickPromise;
+  });
 });

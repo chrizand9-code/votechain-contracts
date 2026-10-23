@@ -168,4 +168,43 @@ describe('FreighterWallet', () => {
 
     resolve(); // finish the request
   });
+
+  // ── SEC (#319): crafted/non-standard address does not get rendered ──────
+  it('rejects a crafted non-standard address from the extension instead of rendering it', async () => {
+    const user = userEvent.setup();
+    installMockFreighter({
+      // Malicious/buggy extension returning a non-address string, e.g. an
+      // attempted markup/script payload instead of a 56-char G-address.
+      getPublicKey: vi.fn().mockResolvedValue('<img src=x onerror=alert(1)>'),
+    });
+    render(<FreighterWallet />);
+
+    await user.click(screen.getByRole('button', { name: /connect (freighter )?wallet/i }));
+
+    // Connection must be rejected — the crafted string is never adopted as
+    // the wallet address, so the component stays in the disconnected state
+    // and surfaces an error instead.
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+    });
+    expect(screen.queryByLabelText(/connected wallet address/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('<img src=x onerror=alert(1)>')).not.toBeInTheDocument();
+  });
+
+  it('auto-restore ignores a stale session reporting a non-standard address', async () => {
+    installMockFreighter({
+      isConnected: vi.fn().mockResolvedValue(true),
+      getPublicKey: vi.fn().mockResolvedValue('not-a-valid-stellar-address'),
+    });
+    render(<FreighterWallet />);
+
+    // The connected-address label renders (address is stored as reported by
+    // isConnected()), but `truncate()` must refuse to echo the raw invalid
+    // value back into the DOM.
+    await waitFor(() => {
+      expect(screen.getByLabelText(/connected wallet address/i)).toBeInTheDocument();
+    });
+    expect(screen.getByLabelText(/connected wallet address/i)).toHaveTextContent('invalid-address');
+    expect(screen.queryByText('not-a-valid-stellar-address')).not.toBeInTheDocument();
+  });
 });

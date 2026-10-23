@@ -86,6 +86,14 @@ function resolveStatus(err: HttpError): {
     return { httpStatus: 400, code: "BAD_REQUEST", message: err.message };
   }
 
+  if (status === 413) {
+    return {
+      httpStatus: 413,
+      code: "PAYLOAD_TOO_LARGE",
+      message: "Request body exceeds the configured size limit.",
+    };
+  }
+
   // Everything else is treated as an internal server error.
   return {
     httpStatus: 500,

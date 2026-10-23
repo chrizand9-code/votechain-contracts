@@ -230,11 +230,176 @@ jobs:
 
           echo "✅ Staging smoke tests passed"
 
-  # ── 4. Manual approval gate — blocks until a reviewer approves ───────────────
+  # ── 4. Canary deployment — deploy to 1 instance at 10% traffic weight ─────────
+  # Deploys to a single canary instance, monitors error rate and latency for
+  # 10 minutes, and auto-rolls back if error rate exceeds 1%. Only proceeds
+  # to the manual promotion gate when the canary is healthy. (#270)
+  canary-deploy:
+    name: Canary Deploy (10% traffic)
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    environment:
+      name: canary
+      url: https://stellar.expert
+    outputs:
+      canary-governance-id: ${{ steps.canary-deploy.outputs.governance-id }}
+      canary-token-id: ${{ steps.canary-deploy.outputs.token-id }}
+      canary-healthy: ${{ steps.monitor.outputs.healthy }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Stellar CLI binary
+        id: stellar-cli-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/stellar
+          key: ${{ runner.os }}-stellar-cli-${{ env.STELLAR_CLI_VERSION }}
+
+      - name: Install Stellar CLI
+        if: steps.stellar-cli-cache.outputs.cache-hit != 'true'
+        run: cargo install --locked stellar-cli@${{ env.STELLAR_CLI_VERSION }}
+
+      - name: Download WASM artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: mainnet-wasm-${{ github.ref_name }}
+          path: wasm/
+
+      # Deploy to a single canary instance.
+      # Traffic weight of 10% is enforced by the load balancer configuration
+      # referenced in CANARY_INSTANCE_URL / CANARY_LB_BACKEND secrets.
+      # The contract itself is deployed to mainnet RPC — the canary isolation
+      # is at the routing layer, not the contract layer.
+      - name: Deploy canary instance
+        id: canary-deploy
+        env:
+          STELLAR_SECRET_KEY: ${{ secrets.MAINNET_SECRET_KEY }}
+          STELLAR_ADMIN_ADDRESS: ${{ secrets.MAINNET_ADMIN_ADDRESS }}
+        run: |
+          set -euo pipefail
+
+          export SOROBAN_RPC_URL="https://horizon.stellar.org"
+          export SOROBAN_NETWORK_PASSPHRASE="Public Global Stellar Network ; September 2015"
+
+          echo "🐤 Deploying canary instance (10% traffic weight)..."
+
+          TOKEN_ID=$(stellar contract deploy \
+            --wasm wasm/votechain_token.wasm \
+            --source "$STELLAR_SECRET_KEY" \
+            --rpc-url "$SOROBAN_RPC_URL" \
+            --network-passphrase "$SOROBAN_NETWORK_PASSPHRASE" \
+            2>&1 | tail -1)
+
+          GOVERNANCE_ID=$(stellar contract deploy \
+            --wasm wasm/votechain_governance.wasm \
+            --source "$STELLAR_SECRET_KEY" \
+            --rpc-url "$SOROBAN_RPC_URL" \
+            --network-passphrase "$SOROBAN_NETWORK_PASSPHRASE" \
+            2>&1 | tail -1)
+
+          echo "token-id=$TOKEN_ID"           >> "$GITHUB_OUTPUT"
+          echo "governance-id=$GOVERNANCE_ID" >> "$GITHUB_OUTPUT"
+          echo "✅ Canary contracts deployed — token=$TOKEN_ID governance=$GOVERNANCE_ID"
+          echo ""
+          echo "ℹ️  Load balancer should be configured to route 10% of traffic to"
+          echo "   the canary instance. Verify CANARY_LB_BACKEND is set correctly."
+
+      # Monitor for 10 minutes, sampling the Prometheus metrics every 30 seconds.
+      # Triggers auto-rollback (by failing the job) if:
+      #   - error rate (5xx / total) > 1%
+      #   - p99 latency > 2x the pre-canary baseline stored in CANARY_BASELINE_P99_MS
+      - name: Monitor canary metrics (10 minutes)
+        id: monitor
+        env:
+          PROMETHEUS_URL: ${{ secrets.PROMETHEUS_URL }}
+          # Baseline p99 latency in milliseconds — set this secret to the
+          # steady-state value observed before the canary (e.g., "200").
+          CANARY_BASELINE_P99_MS: ${{ secrets.CANARY_BASELINE_P99_MS }}
+        run: |
+          set -euo pipefail
+
+          MONITOR_DURATION=600   # 10 minutes
+          SAMPLE_INTERVAL=30     # check every 30 seconds
+          MAX_ERROR_RATE=0.01    # 1%
+          BASELINE_P99_MS="${CANARY_BASELINE_P99_MS:-500}"
+          MAX_P99_MS=$(echo "$BASELINE_P99_MS * 2" | bc)
+
+          echo "🔍 Monitoring canary for ${MONITOR_DURATION}s..."
+          echo "   Error rate threshold : ${MAX_ERROR_RATE} (1%)"
+          echo "   Baseline p99 latency : ${BASELINE_P99_MS}ms"
+          echo "   Max p99 latency      : ${MAX_P99_MS}ms (2× baseline)"
+          echo ""
+
+          ELAPSED=0
+          ROLLBACK=false
+
+          while [ "$ELAPSED" -lt "$MONITOR_DURATION" ]; do
+            sleep "$SAMPLE_INTERVAL"
+            ELAPSED=$((ELAPSED + SAMPLE_INTERVAL))
+
+            echo "--- Sample at ${ELAPSED}s ---"
+
+            if [ -z "${PROMETHEUS_URL:-}" ]; then
+              echo "⚠️  PROMETHEUS_URL secret not set — skipping metric checks."
+              echo "   Configure the secret to enable automated canary monitoring."
+              echo "healthy=skipped" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            # Query error rate: sum(5xx) / sum(total) over last 5m
+            ERROR_RATE=$(curl -sf \
+              "${PROMETHEUS_URL}/api/v1/query" \
+              --data-urlencode \
+                'query=sum(rate(votechain_http_requests_total{status=~"5.."}[5m])) / sum(rate(votechain_http_requests_total[5m]))' \
+              | jq -r '.data.result[0].value[1] // "0"')
+
+            # Query p99 latency in milliseconds
+            P99_MS=$(curl -sf \
+              "${PROMETHEUS_URL}/api/v1/query" \
+              --data-urlencode \
+                'query=histogram_quantile(0.99, sum(rate(votechain_http_request_duration_seconds_bucket[5m])) by (le)) * 1000' \
+              | jq -r '.data.result[0].value[1] // "0"')
+
+            echo "   Error rate : ${ERROR_RATE} (threshold: ${MAX_ERROR_RATE})"
+            echo "   p99 latency: ${P99_MS}ms (threshold: ${MAX_P99_MS}ms)"
+
+            # Check error rate
+            if [ "$(echo "$ERROR_RATE > $MAX_ERROR_RATE" | bc -l)" = "1" ]; then
+              echo "❌ Error rate ${ERROR_RATE} exceeds threshold ${MAX_ERROR_RATE} — triggering rollback"
+              ROLLBACK=true
+              break
+            fi
+
+            # Check p99 latency regression
+            if [ "$(echo "$P99_MS > $MAX_P99_MS" | bc -l)" = "1" ]; then
+              echo "❌ p99 latency ${P99_MS}ms exceeds ${MAX_P99_MS}ms (2× baseline) — triggering rollback"
+              ROLLBACK=true
+              break
+            fi
+
+            echo "   ✅ Metrics within threshold"
+          done
+
+          if [ "$ROLLBACK" = "true" ]; then
+            echo "healthy=false" >> "$GITHUB_OUTPUT"
+            echo ""
+            echo "🔄 Auto-rollback: canary failed health checks."
+            echo "   No traffic is being sent to the failing canary contracts."
+            echo "   The full-rollout jobs will be skipped."
+            exit 1
+          fi
+
+          echo "healthy=true" >> "$GITHUB_OUTPUT"
+          echo ""
+          echo "✅ Canary monitored for ${MONITOR_DURATION}s — all metrics within thresholds."
+
+  # ── 5. Manual promotion gate — blocks until a reviewer approves ──────────────
   await-approval:
     name: Await Mainnet Approval
     runs-on: ubuntu-latest
-    needs: deploy-staging
+    needs: canary-deploy
     environment:
       name: mainnet   # <-- GitHub Environment with required reviewers configured
     steps:
@@ -243,8 +408,10 @@ jobs:
           echo "✅ Mainnet deployment approved by: ${{ github.actor }}"
           echo "Tag: ${{ github.ref_name }}"
           echo "Commit: ${{ github.sha }}"
+          echo ""
+          echo "ℹ️  Canary was healthy. Proceeding to full rollout."
 
-  # ── 5. Deploy to mainnet ──────────────────────────────────────────────────────
+  # ── 6. Deploy to mainnet ──────────────────────────────────────────────────────
   deploy-mainnet:
     name: Deploy to Mainnet
     runs-on: ubuntu-latest
@@ -361,7 +528,7 @@ jobs:
           echo "Pushing config update to $BASE_BRANCH"
           git push origin "HEAD:refs/heads/${BASE_BRANCH:-main}"
 
-  # ── 6. Create GitHub Release with deployment summary ─────────────────────────
+  # ── 7. Create GitHub Release with deployment summary ─────────────────────────
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest

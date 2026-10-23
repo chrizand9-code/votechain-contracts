@@ -1,5 +1,7 @@
 #[cfg(test)]
 mod chaos_test;
+#[cfg(test)]
+mod e2e_test;
 
 use std::{env, time::Duration};
 

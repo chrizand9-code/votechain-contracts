@@ -62,6 +62,10 @@ Source: [`contracts/governance/src/types.rs`](../contracts/governance/src/types.
 | 47 | `AlreadyExtended` | The proposal's voting period has already been extended once. | `extend_voting` | A proposal can only receive one voting-period extension. |
 | 48 | `CommentHashTooLong` | The optional vote comment hash exceeds the maximum length of 64 bytes. | `cast_vote` | Shorten the comment hash to 64 bytes or fewer. |
 | 49 | `CircularDelegation` | A delegation would create a cycle in the delegate chain. | `delegate` | Choose a delegate whose delegation chain does not lead back to you. |
+| 50 | `TemplateNotFound` | No proposal template exists for the given template ID. | `create_proposal_from_template`, `remove_template` | Verify the template ID with `list_templates()` before using it. |
+| 51 | `TemplateAlreadyExists` | A template with this ID is already registered. | `register_template` | Use a unique template ID, or remove the existing template first. |
+| 52 | `InvalidTemplateId` | The template ID is empty or exceeds the maximum allowed length. | `register_template`, `create_proposal_from_template` | Provide a non-empty template ID within the length limit. |
+| 53 | `QuorumBelowFloor` | The requested quorum is below the configured minimum quorum floor (`MIN_QUORUM_BPS`). | `update_quorum` | Set a quorum at or above `ceil(supply_snapshot × min_quorum_bps / 10_000)`. Inspect the floor via `get_config().min_quorum_bps`. |
 
 ### Known documentation/code gap
 

@@ -6,7 +6,10 @@ repository, using the tool best suited to each:
 ## TypeScript / JavaScript — CodeQL
 
 `.github/workflows/codeql.yml` runs GitHub CodeQL's `javascript-typescript` analysis with the
-`security-extended` query pack against `backend/` and `frontend/`.
+`security-extended` query pack. The job declares no `paths`/`paths-ignore` filter, so it analyses
+every TypeScript/JavaScript source tree in the repository, not just `backend/` and `frontend/` —
+this also covers `sdk/` (`sdk/src/*.ts`) and `bots/governance-alerts/index.ts`, both of which exist
+in-tree and previously weren't called out here.
 
 - **Triggers:** every push to `main`, every pull request targeting `main`, and a weekly scheduled
   run (`0 8 * * 1`, Mondays 08:00 UTC) to catch newly published CodeQL queries against unchanged
@@ -35,6 +38,25 @@ same blocking effect on PRs that CodeQL's severity gate has for the TypeScript s
 
 If CodeQL later ships first-class Rust support, this document should be revisited and the
 `analyze` job's `languages` matrix expanded to include `rust` again.
+
+## Existing findings triage (issue #310 acceptance criterion)
+
+As of this writing, triaging **existing** open code-scanning alerts in the GitHub Security tab
+requires `security_events`/code-scanning read access on the repository, which is outside what a
+contributor PR can grant itself (the alert API returns `403` for accounts without that repo-level
+permission — confirmed while preparing this change). A maintainer with admin or security-manager
+access on `veracindarella/votechain-contracts` should run:
+
+```
+gh api repos/veracindarella/votechain-contracts/code-scanning/alerts --jq \
+  '.[] | select(.state=="open") | {number, severity: .rule.security_severity_level, rule: .rule.id, path: .most_recent_instance.location.path}'
+```
+
+and either fix or dismiss (with a documented reason, e.g. "false positive" or "won't fix: accepted
+risk") every alert with `security_severity_level` of `critical` or `high`, since those already
+block merges via `enforce-severity-gate`. This section exists so that triage step isn't silently
+skipped — it should be marked done here once a maintainer completes it, or converted into a
+dedicated `SEC-0NN` finding if any alert turns out to be a real, unresolved vulnerability.
 
 ## Scan Frequency Summary
 

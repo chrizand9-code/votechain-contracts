@@ -1,0 +1,38 @@
+name: Dependabot Auto-Merge
+
+# Automatically merge Dependabot patch-level PRs that pass CI.
+# Triggered when Dependabot opens or re-runs a PR.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    name: Auto-merge patch updates
+    runs-on: ubuntu-latest
+    # Only act on Dependabot PRs
+    if: github.actor == 'dependabot[bot]'
+    steps:
+      - name: Fetch Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Auto-merge patch-level npm and Cargo updates only.
+      # Minor and major updates require human review.
+      - name: Auto-merge patch updates
+        if: |
+          steps.meta.outputs.update-type == 'version-update:semver-patch' &&
+          (steps.meta.outputs.package-ecosystem == 'npm' ||
+           steps.meta.outputs.package-ecosystem == 'cargo')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Approving and enabling auto-merge for patch update PR #${{ github.event.pull_request.number }}"
+          gh pr review --approve "${{ github.event.pull_request.html_url }}"
+          gh pr merge --auto --squash "${{ github.event.pull_request.html_url }}"

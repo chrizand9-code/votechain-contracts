@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { RedisClient } from '../middleware/redisCache';
+import { RedisClientType } from 'redis';
+import { LEADERBOARD_CACHE_TTL_SECONDS } from '../middleware/redisCache';
+
+type MaybeRedis = RedisClientType | null | undefined;
 
 export interface LeaderboardEntry {
   address: string;
@@ -22,21 +25,23 @@ export interface LeaderboardEntry {
   rank: number;
 }
 
-const LEADERBOARD_CACHE_KEY = 'leaderboard:top50';
-const CACHE_TTL_SECONDS = 300; // 5 minutes
+const LEADERBOARD_CACHE_KEY_PREFIX = 'leaderboard:data:';
 
 /**
  * Computes the top 50 voters by proposal participation count.
- * Results are cached for 5 minutes. Returns an empty list when Redis
+ * Results are cached for the configured TTL. Returns an empty list when Redis
  * is unavailable.
  */
 export async function getLeaderboard(
-  redisClient: MaybeRedis
+  redisClient: MaybeRedis,
+  filterKey = "",
 ): Promise<LeaderboardEntry[]> {
   if (!redisClient?.isOpen) return [];
 
+  const cacheKey = `${LEADERBOARD_CACHE_KEY_PREFIX}${filterKey}`;
+
   // Try to get from cache first
-  const cached = await redisClient.get(LEADERBOARD_CACHE_KEY);
+  const cached = await redisClient.get(cacheKey);
   if (cached) {
     return JSON.parse(cached) as LeaderboardEntry[];
   }
@@ -45,8 +50,8 @@ export async function getLeaderboard(
   const leaderboard: LeaderboardEntry[] = [];
 
   await redisClient.setEx(
-    LEADERBOARD_CACHE_KEY,
-    CACHE_TTL_SECONDS,
+    cacheKey,
+    LEADERBOARD_CACHE_TTL_SECONDS,
     JSON.stringify(leaderboard)
   );
 
@@ -60,7 +65,11 @@ export async function invalidateLeaderboardCache(
   redisClient: MaybeRedis
 ): Promise<void> {
   if (!redisClient?.isOpen) return;
-  await redisClient.del(LEADERBOARD_CACHE_KEY);
+  for await (const key of redisClient.scanIterator({
+    MATCH: `${LEADERBOARD_CACHE_KEY_PREFIX}*`,
+  })) {
+    await redisClient.del(key);
+  }
 }
 
 /**

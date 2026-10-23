@@ -11,6 +11,10 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
     defaults:
       run:
         working-directory: frontend
@@ -78,6 +82,8 @@ jobs:
         run: kill "$(cat /tmp/votechain-preview.pid)" 2>/dev/null || true
 
       - name: Track bundle size
+        env:
+          BUNDLE_SIZE_LIMIT_KB: ${{ vars.BUNDLE_SIZE_LIMIT_KB || '500' }}
         run: npm run size
 
       - name: Upload bundle report
@@ -137,31 +143,26 @@ jobs:
           echo "skip=false" >> "$GITHUB_OUTPUT"
 
       - name: Post bundle size comment on PR
-        if: >
-          github.event_name == 'pull_request' &&
-          steps.bundle_compare.outputs.skip != 'true' &&
-          steps.bundle_compare.outputs.significant == 'true'
+        if: github.event_name == 'pull_request'
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
           script: |
-            const prGzip   = '${{ steps.bundle_compare.outputs.pr_gzip }}';
-            const baseGzip = '${{ steps.bundle_compare.outputs.base_gzip }}';
-            const change   = '${{ steps.bundle_compare.outputs.change }}';
-            const sign     = parseFloat(change) > 0 ? '+' : '';
-            const emoji    = parseFloat(change) > 0 ? '📈' : '📉';
+            const fs = require('fs');
+            const report = JSON.parse(fs.readFileSync('frontend/dist/bundle-report.json', 'utf8'));
+            const chunks = report.bundles
+              .map(({ file, rawKb, gzipKb }) => `| ${file} | ${rawKb} KB | ${gzipKb} KB |`)
+              .join('\n');
 
             const body = [
-              '## Bundle Size Report ' + emoji,
+              '## Bundle Size Report',
               '',
-              '> Bundle size changed by more than 5% in this PR.',
+              `Main bundle: **${report.mainBundleGzipKb} KB gzipped** (${report.passed ? 'within' : 'over'} the ${report.limitKb} KB limit).`,
               '',
-              '| | Gzip (KB) |',
-              '|---|---|',
-              `| Base (\`${{ github.base_ref }}\`) | ${baseGzip} KB |`,
-              `| This PR | ${prGzip} KB |`,
-              `| Change | ${sign}${change}% |`,
+              '| Chunk | Raw | Gzip |',
+              '|---|---:|---:|',
+              chunks,
               '',
-              `**Budget limit:** 250 KB gzip`,
+              `**Total JavaScript:** ${report.totalGzipKb} KB gzipped`,
             ].join('\n');
 
             await github.rest.issues.createComment({

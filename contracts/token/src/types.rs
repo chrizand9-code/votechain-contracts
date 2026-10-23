@@ -37,6 +37,20 @@ pub enum ContractError {
     AllowanceExpired = 8,
     /// 9 – expiry_ledger must be >= current ledger sequence
     InvalidExpiry = 9,
+    /// 10 – SEC-013: transfer/transfer_from amount exceeds the transferable
+    /// (unstaked) balance while an active stake lock is in effect
+    TokensLocked = 10,
+    /// 11 – SEC-013: no active stake position exists for the given address
+    StakeNotFound = 11,
+    /// 12 – SEC-013: unstake called before `locked_until` has elapsed
+    StakeLocked = 12,
+    /// 13 – SEC-013: `lock_duration_seconds` exceeds `MAX_LOCK_DAYS` in seconds
+    InvalidLockDuration = 13,
+    /// 14 – SEC-013: checked arithmetic overflow while computing `locked_until`
+    ArithmeticOverflow = 14,
+    /// 15 – SEC-013: caller already has an active stake position (v1 supports
+    /// only a single position per address)
+    AlreadyStaked = 15,
 }
 
 /// Per-allowance record storing both the approved amount and the ledger sequence
@@ -100,4 +114,8 @@ pub enum TokenDataKey {
     /// Contract version stored as a `(major, minor, patch)` semver tuple (instance storage).
     /// Key space: singleton — only one `Version` entry exists.
     Version,
+
+    /// SEC-013: Active ve-token stake position for `Address` (persistent storage).
+    /// Key space: one entry per staker; removed on `unstake`.
+    StakeRecord(Address),
 }

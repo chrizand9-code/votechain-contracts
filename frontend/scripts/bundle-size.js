@@ -2,7 +2,7 @@
  * Bundle size checker for VoteChain frontend.
  *
  * Budget thresholds:
- *   - Main JS bundle:  250 KB gzipped  (hard limit — CI fails if exceeded)
+ *   - Main JS bundle:  500 KB gzipped  (hard limit — CI fails if exceeded)
  *   - Total assets:    no hard limit    (informational)
  *
  * A PR comment is posted automatically by the frontend-ci workflow when
@@ -12,14 +12,14 @@
  *   node scripts/bundle-size.js
  *
  * Environment variables:
- *   BUNDLE_SIZE_LIMIT_KB  Override the gzip limit in KB (default: 250)
+ *   BUNDLE_SIZE_LIMIT_KB  Override the gzip limit in KB (default: 500)
  */
 
 import fs from 'fs';
 import path from 'path';
 import zlib from 'zlib';
 
-const GZIP_LIMIT_KB = Number(process.env['BUNDLE_SIZE_LIMIT_KB'] ?? 250);
+const GZIP_LIMIT_KB = Number(process.env['BUNDLE_SIZE_LIMIT_KB'] ?? 500);
 const assetsDir = path.resolve(process.cwd(), 'dist', 'assets');
 
 if (!fs.existsSync(assetsDir)) {

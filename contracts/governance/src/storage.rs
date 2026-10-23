@@ -37,7 +37,7 @@
 //! Because the discriminant is part of the serialised key, these can never
 //! collide even when called with identical arguments.
 
-use crate::types::{ContractError, ContractState, DataKey, PendingMultisigAction, Proposal, VoteRecord};
+use crate::types::{ContractError, ContractState, DataKey, PendingMultisigAction, Proposal, ProposalTemplate, VoteRecord};
 use soroban_sdk::{Address, Env, Vec};
 
 // =============================================================================
@@ -505,4 +505,75 @@ pub fn decrement_active_proposals(env: &Env) {
     env.storage()
         .instance()
         .set(&DataKey::ActiveProposalsCount, &current.saturating_sub(1));
+}
+
+// ---------------------------------------------------------------------------
+// Proposal template storage (issue #324)
+// ---------------------------------------------------------------------------
+
+/// Maximum byte length of a template ID string.
+pub const MAX_TEMPLATE_ID_LEN: u32 = 64;
+
+/// Stores a proposal template in persistent storage, keyed by its template ID.
+///
+/// Also bumps the persistent-storage TTL so the entry survives long-term
+/// without expiring.
+pub fn save_template(env: &Env, template: &ProposalTemplate) {
+    let key = DataKey::ProposalTemplate(template.template_id.clone());
+    env.storage().persistent().set(&key, template);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, TTL_MIN_LEDGERS, TTL_MAX_LEDGERS);
+}
+
+/// Loads a proposal template from storage by its string ID.
+///
+/// Bumps the persistent-storage TTL on every successful read.
+///
+/// # Errors
+/// - [`ContractError::TemplateNotFound`] if no template exists for `template_id`.
+pub fn load_template(env: &Env, template_id: &String) -> Result<ProposalTemplate, ContractError> {
+    let key = DataKey::ProposalTemplate(template_id.clone());
+    let template = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(ContractError::TemplateNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, TTL_MIN_LEDGERS, TTL_MAX_LEDGERS);
+    Ok(template)
+}
+
+/// Returns `true` if a template with the given ID already exists.
+pub fn has_template(env: &Env, template_id: &String) -> bool {
+    env.storage()
+        .persistent()
+        .has(&DataKey::ProposalTemplate(template_id.clone()))
+}
+
+/// Removes a proposal template from storage. Returns `true` if a template
+/// was deleted, `false` if no template existed for the given ID.
+pub fn remove_template(env: &Env, template_id: &String) -> bool {
+    let key = DataKey::ProposalTemplate(template_id.clone());
+    let existed = env.storage().persistent().has(&key);
+    if existed {
+        env.storage().persistent().remove(&key);
+    }
+    existed
+}
+
+/// Stores the minimum quorum floor (in basis points) in instance storage.
+/// `10` BPS = 0.1 % of total supply.
+pub fn set_min_quorum_bps(env: &Env, bps: u32) {
+    env.storage().instance().set(&DataKey::MinQuorumBps, &bps);
+}
+
+/// Returns the stored minimum quorum BPS floor.
+/// Defaults to `10` (0.1 % of supply) if never set.
+pub fn get_min_quorum_bps(env: &Env) -> u32 {
+    env.storage()
+        .instance()
+        .get(&DataKey::MinQuorumBps)
+        .unwrap_or(10)
 }
